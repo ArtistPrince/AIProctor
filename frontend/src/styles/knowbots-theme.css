@@ -1,0 +1,19 @@
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: 30 11 75;
+  --foreground: 255 255 255;
+  --card: 42 20 92;
+  --card-foreground: 255 255 255;
+  --primary: 124 58 237;
+  --primary-foreground: 255 255 255;
+  --secondary: 76 29 149;
+  --secondary-foreground: 255 255 255;
+  --accent: 217 70 239;
+  --accent-foreground: 255 255 255;
+  --muted: 67 56 202;
+  --muted-foreground: 199 210 254;
+  --border: 124 58 237;
+  --input: 124 58 237;
+  --ring: 217 70 239;
+}

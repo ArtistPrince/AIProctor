@@ -1,0 +1,41 @@
+node_modules/
+**/node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.venv/
+venv/
+
+# Env and secrets
+.env
+.env.*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Logs and caches
+*.log
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build artifacts
+dist/
+build/
+coverage/
+
+# Project-specific generated files
+upload/uploads/
+
+# Archives and installers
+*.zip
+*.rar
+*.7z
+*.msi
+
+# Temporary office files
+~$*.docx
