@@ -30,12 +30,28 @@ coverage/
 
 # Project-specific generated files
 upload/uploads/
+backend/uploads/
+backend/scripts/tempCodeRunnerFile.py
 
 # Archives and installers
 *.zip
 *.rar
 *.7z
 *.msi
+*.docx
 
 # Temporary office files
 ~$*.docx
+
+# Non-primary projects and docs
+NewFront/
+Knowbots Student Dashboard Design/
+Face_Recognition_Project_Pheme/
+docs/
+API_REFERENCE.md
+CODE_MAP.md
+DATA_MIGRATION_GUIDE.md
+DEVELOPER_DOCUMENTATION.md
+FRONTEND_SETUP.md
+QUICK_START.md
+REFACTORING_SUMMARY.md
