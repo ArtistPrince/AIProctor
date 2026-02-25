@@ -44,6 +44,7 @@ backend/scripts/tempCodeRunnerFile.py
 ~$*.docx
 
 # Non-primary projects and docs
+misc/
 NewFront/
 Knowbots Student Dashboard Design/
 Face_Recognition_Project_Pheme/
