@@ -1,41 +1,29 @@
 import { useEffect, useState } from 'react';
 import api from '@/lib/api';
 
-interface Department {
-  id: string;
-  name: string;
-  code: string;
-}
-
 interface Batch {
   id: string;
   name: string;
-  department_id: string;
-  batch_year: number;
+  course_code: string;
+  batch_year: string;
+  course_name: string;
   members: string[];
 }
 
 export default function BatchesPage() {
-  const [departments, setDepartments] = useState<Department[]>([]);
   const [batches, setBatches] = useState<Batch[]>([]);
 
-  const [batchName, setBatchName] = useState('');
-  const [batchYear, setBatchYear] = useState<number>(new Date().getFullYear());
-  const [departmentId, setDepartmentId] = useState('');
+  const [courseName, setCourseName] = useState('');
+  const [courseCode, setCourseCode] = useState('');
+  const [batchYear, setBatchYear] = useState<string>(String(new Date().getFullYear()).slice(-2));
   const [batchMembers, setBatchMembers] = useState('');
 
   const [batchSelectId, setBatchSelectId] = useState('');
   const [batchAddMembers, setBatchAddMembers] = useState('');
 
   useEffect(() => {
-    fetchDepartments();
     fetchBatches();
   }, []);
-
-  const fetchDepartments = async () => {
-    const response = await api.get('/departments/');
-    setDepartments(response.data);
-  };
 
   const fetchBatches = async () => {
     const response = await api.get('/batches/');
@@ -51,15 +39,15 @@ export default function BatchesPage() {
 
   const handleCreateBatch = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!departmentId) return;
     const members = parseIdList(batchMembers);
     await api.post('/batches/', {
-      name: batchName,
-      department_id: departmentId,
-      batch_year: Number(batchYear),
+      course_name: courseName,
+      course_code: courseCode,
+      batch_year: String(batchYear),
       members,
     });
-    setBatchName('');
+    setCourseName('');
+    setCourseCode('');
     setBatchMembers('');
     fetchBatches();
   };
@@ -85,42 +73,36 @@ export default function BatchesPage() {
         <div className="bg-card rounded-xl border border-border card-shadow p-6">
           <h2 className="text-lg font-semibold text-foreground mb-4">Create Batch</h2>
           <form onSubmit={handleCreateBatch} className="space-y-4">
-            <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">Department</label>
-              <select
-                className="w-full h-10 px-3 rounded-lg bg-secondary border border-border text-sm"
-                value={departmentId}
-                onChange={(e) => setDepartmentId(e.target.value)}
-                required
-              >
-                <option value="">Select department</option>
-                {departments.map((dept) => (
-                  <option key={dept.id} value={dept.id}>{dept.code} · {dept.name}</option>
-                ))}
-              </select>
-            </div>
-
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">Batch Name</label>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">Course Name</label>
                 <input
                   className="w-full h-10 px-3 rounded-lg bg-secondary border border-border text-sm"
-                  value={batchName}
-                  onChange={(e) => setBatchName(e.target.value)}
+                  value={courseName}
+                  onChange={(e) => setCourseName(e.target.value)}
                   required
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">Batch Year</label>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">Course Code</label>
                 <input
-                  type="number"
                   className="w-full h-10 px-3 rounded-lg bg-secondary border border-border text-sm"
-                  value={batchYear}
-                  onChange={(e) => setBatchYear(Number(e.target.value))}
+                  value={courseCode}
+                  onChange={(e) => setCourseCode(e.target.value.toUpperCase())}
                   required
                 />
               </div>
             </div>
+
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Batch Year (e.g. 26)</label>
+                <input
+                  className="w-full h-10 px-3 rounded-lg bg-secondary border border-border text-sm"
+                  value={batchYear}
+                  onChange={(e) => setBatchYear(e.target.value)}
+                  required
+                />
+              </div>
 
             <div>
               <label className="block text-xs font-medium text-muted-foreground mb-1">Member User IDs (comma-separated)</label>
@@ -181,7 +163,7 @@ export default function BatchesPage() {
           ) : (
             batches.map((batch) => (
               <div key={batch.id} className="border-b border-border/30 pb-2 last:border-0">
-                <p className="text-sm font-medium text-foreground">{batch.id} · {batch.name}</p>
+                <p className="text-sm font-medium text-foreground">{batch.id} · {batch.course_name} ({batch.course_code}-{batch.batch_year})</p>
                 <p className="text-xs text-muted-foreground">Members: {batch.members.join(', ') || 'None'}</p>
               </div>
             ))

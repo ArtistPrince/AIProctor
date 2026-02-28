@@ -11,10 +11,10 @@ export interface User {
 
 export interface Institute {
   id: string;
+  institute_code: string;
   name: string;
-  code: string;
-  subscription_plan: 'basic' | 'pro' | 'enterprise';
-  is_active: boolean;
+  address?: string;
+  contact_email?: string;
   created_at: string;
 }
 
@@ -32,14 +32,14 @@ export interface Student {
 export interface Exam {
   id: string;
   title: string;
-  description: string;
   institute_id: string;
-  created_by: string;
+  faculty_id: string;
+  subject_code: string;
+  exam_type: string;
+  exam_year: string;
   duration_minutes: number;
-  total_marks: number;
-  proctoring_config: ProctoringConfig;
-  status: 'draft' | 'scheduled' | 'live' | 'completed';
-  scheduled_at?: string;
+  passing_marks: number;
+  scheduled_time?: string;
   created_at: string;
 }
 
@@ -68,7 +68,10 @@ export interface Batch {
   id: string;
   name: string;
   institute_id: string;
-  student_count: number;
+  course_code: string;
+  batch_year: string;
+  course_name: string;
+  student_count?: number;
   created_at: string;
 }
 

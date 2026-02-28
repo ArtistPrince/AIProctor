@@ -1,7 +1,8 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
-from pydantic import BaseModel
+
+from pydantic import BaseModel, Field
 
 
 class Token(BaseModel):
@@ -13,16 +14,19 @@ class Token(BaseModel):
 
 
 class InstituteCreate(BaseModel):
+	institute_code: str
 	name: str
-	plan: str = "Free"
-	config: Dict[str, Any] = {}
+	address: Optional[str] = None
+	contact_email: Optional[str] = None
 
 
 class InstituteOut(BaseModel):
 	id: str
+	institute_code: str
 	name: str
-	plan: str
-	config: Dict[str, Any]
+	address: Optional[str] = None
+	contact_email: Optional[str] = None
+	created_at: Optional[datetime] = None
 
 	class Config:
 		from_attributes = True
@@ -32,9 +36,11 @@ class UserOut(BaseModel):
 	id: str
 	institute_id: Optional[str] = None
 	batch_id: Optional[str] = None
+	name: Optional[str] = None
 	email: str
 	role: str
 	profile_image: Optional[str] = None
+	code: Optional[str] = None
 
 	class Config:
 		from_attributes = True
@@ -66,16 +72,35 @@ class StudentOut(BaseModel):
 class UserCreate(BaseModel):
 	institute_id: Optional[str] = None
 	batch_id: Optional[str] = None
+	name: str
 	email: str
 	password: str
 	role: str
-	profile_image: Optional[str] = None
+	emp_id: Optional[str] = None
+	dept_code: Optional[str] = None
+	section: Optional[str] = None
+	roll_no: Optional[str] = None
 
 
-class DepartmentCreate(BaseModel):
+class FacultyCreate(BaseModel):
 	institute_id: str
 	name: str
-	code: Optional[str] = None
+	dept_code: str
+	emp_id: str
+	email: str
+
+
+class FacultyOut(BaseModel):
+	id: str
+	institute_id: str
+	name: str
+	dept_code: str
+	emp_id: str
+	faculty_code: Optional[str] = None
+	email: str
+
+	class Config:
+		from_attributes = True
 
 
 class DepartmentOut(BaseModel):
@@ -89,25 +114,33 @@ class DepartmentOut(BaseModel):
 
 
 class ExamCreate(BaseModel):
-	department_id: str
+	faculty_id: str
+	subject_code: str
+	exam_type: str
+	exam_year: str
 	title: str
-	duration: int
-	start_time: Optional[datetime] = None
-	end_time: Optional[datetime] = None
-	proctor_config: Dict[str, Any] = {}
-	random_rules: Dict[str, Any] = {}
+	duration_minutes: int = Field(alias="duration")
+	passing_marks: int
+	scheduled_time: Optional[datetime] = None
+
+	class Config:
+		populate_by_name = True
 
 
 class ExamOut(BaseModel):
 	id: str
-	institute_id: Optional[str] = None
-	department_id: Optional[str] = None
+	institute_id: str
+	faculty_id: str
+	subject_code: str
+	exam_type: str
+	exam_year: str
+	exam_code: Optional[str] = None
 	title: str
+	duration_minutes: int
+	passing_marks: int
+	scheduled_time: Optional[datetime] = None
+	created_at: Optional[datetime] = None
 	duration: int
-	start_time: Optional[datetime] = None
-	end_time: Optional[datetime] = None
-	proctor_config: Dict[str, Any]
-	random_rules: Dict[str, Any]
 
 	class Config:
 		from_attributes = True
@@ -115,7 +148,7 @@ class ExamOut(BaseModel):
 
 class QuestionCreate(BaseModel):
 	exam_id: str
-	type: str
+	type: Optional[str] = "MCQ"
 	text: str
 	marks: int = 1
 	data: Dict[str, Any] = {}
@@ -123,6 +156,7 @@ class QuestionCreate(BaseModel):
 
 class QuestionOut(BaseModel):
 	id: UUID | str
+	institute_id: Optional[str] = None
 	exam_id: str
 	type: str
 	text: str
@@ -134,19 +168,23 @@ class QuestionOut(BaseModel):
 
 
 class BatchCreate(BaseModel):
-	department_id: str
-	batch_year: int
-	name: str
+	institute_id: Optional[str] = None
+	course_code: str
+	batch_year: str
+	course_name: str
 	members: List[str] = []
 
 
 class BatchOut(BaseModel):
 	id: str
-	institute_id: Optional[str] = None
-	department_id: Optional[str] = None
-	batch_year: int
+	institute_id: str
+	course_code: str
+	batch_year: str
+	batch_code: Optional[str] = None
+	course_name: str
 	name: str
 	members: List[str]
+	created_at: Optional[datetime] = None
 
 	class Config:
 		from_attributes = True
@@ -154,15 +192,16 @@ class BatchOut(BaseModel):
 
 class ExamAssignmentCreate(BaseModel):
 	exam_id: str
-	batch_id: Optional[str] = None
-	student_id: Optional[str] = None
+	batch_id: str
 
 
 class ExamAssignmentOut(BaseModel):
 	id: UUID | str
+	institute_id: Optional[str] = None
 	exam_id: str
-	batch_id: Optional[str] = None
+	batch_id: str
 	student_id: Optional[str] = None
+	assigned_at: Optional[datetime] = None
 
 	class Config:
 		from_attributes = True
@@ -184,16 +223,22 @@ class ExamSessionCreate(BaseModel):
 	exam_id: str
 	score: Optional[int] = None
 	integrity: Optional[int] = None
-	status: Optional[str] = "submitted"
+	status: Optional[str] = "completed"
 
 
 class ExamSessionOut(BaseModel):
 	id: str
+	institute_id: Optional[str] = None
 	student_id: str
 	exam_id: str
 	status: str
 	score: Optional[int] = None
 	integrity: Optional[int] = None
+	started_at: Optional[datetime] = None
+	completed_at: Optional[datetime] = None
+	violation_found: Optional[bool] = False
+	mongo_log_ref: Optional[str] = None
+	s3_media_prefix: Optional[str] = None
 
 	class Config:
 		from_attributes = True

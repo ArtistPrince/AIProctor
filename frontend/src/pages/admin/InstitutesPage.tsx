@@ -3,24 +3,21 @@ import { useEffect, useMemo, useState } from 'react';
 import api from '@/lib/api';
 
 interface Institute {
-  id: number;
+  id: string;
+  institute_code: string;
   name: string;
-  plan: string;
-  config: Record<string, unknown>;
+  address?: string | null;
+  contact_email?: string | null;
 }
 
 interface User {
-  id: number;
+  id: string;
   email: string;
   role: string;
-  institute_id?: number | null;
+  institute_id?: string | null;
 }
 
-const planStyles: Record<string, string> = {
-  Free: 'bg-secondary text-muted-foreground border border-border',
-  Pro: 'bg-violet-50 text-violet-700 border border-violet-200',
-  Enterprise: 'badge-info',
-};
+const codeStyle = 'bg-secondary text-muted-foreground border border-border';
 
 export default function InstitutesPage() {
   const [institutes, setInstitutes] = useState<Institute[]>([]);
@@ -44,11 +41,11 @@ export default function InstitutesPage() {
   }, []);
 
   const studentCounts = useMemo(() => {
-    const counts: Record<number, number> = {};
+    const counts: Record<string, number> = {};
     users
       .filter((user) => user.role === 'student' && user.institute_id != null)
       .forEach((user) => {
-        const key = Number(user.institute_id);
+        const key = String(user.institute_id);
         counts[key] = (counts[key] || 0) + 1;
       });
     return counts;
@@ -84,7 +81,7 @@ export default function InstitutesPage() {
         <table className="w-full">
           <thead>
             <tr className="border-b border-border bg-secondary/40">
-              {['Institution', 'Plan', 'Students', ''].map((h) => (
+              {['Institution', 'Code', 'Students', ''].map((h) => (
                 <th
                   key={h}
                   className="px-4 py-3 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider"
@@ -121,8 +118,8 @@ export default function InstitutesPage() {
                   </div>
                 </td>
                 <td className="px-4 py-3.5">
-                  <span className={`px-2.5 py-1 rounded-md text-[11px] font-semibold ${planStyles[inst.plan] ?? 'badge-info'}`}>
-                    {inst.plan}
+                  <span className={`px-2.5 py-1 rounded-md text-[11px] font-semibold ${codeStyle}`}>
+                    {inst.institute_code}
                   </span>
                 </td>
                 <td className="px-4 py-3.5 text-sm text-foreground font-medium">

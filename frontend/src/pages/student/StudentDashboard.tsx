@@ -41,6 +41,8 @@ export default function StudentDashboard() {
 
   useEffect(() => {
     fetchAssignments();
+    const interval = window.setInterval(fetchAssignments, 30000);
+    return () => window.clearInterval(interval);
   }, []);
 
   const firstName = useMemo(() => user?.name?.split(' ')[0] || 'Student', [user?.name]);
@@ -54,12 +56,12 @@ export default function StudentDashboard() {
       .slice(0, 2);
   }, [user?.name, user?.email]);
 
-  const nextAssignment = useMemo(() => {
+  const latestAssignment = useMemo(() => {
     if (!assignments.length) return null;
     const sorted = [...assignments].sort((a, b) => {
-      const aTime = a.exam.start_time ? new Date(a.exam.start_time).getTime() : Number.MAX_SAFE_INTEGER;
-      const bTime = b.exam.start_time ? new Date(b.exam.start_time).getTime() : Number.MAX_SAFE_INTEGER;
-      return aTime - bTime;
+      const aTime = a.exam.start_time ? new Date(a.exam.start_time).getTime() : Number.MIN_SAFE_INTEGER;
+      const bTime = b.exam.start_time ? new Date(b.exam.start_time).getTime() : Number.MIN_SAFE_INTEGER;
+      return bTime - aTime;
     });
     return sorted[0];
   }, [assignments]);
@@ -129,18 +131,18 @@ export default function StudentDashboard() {
                 <CardHeader className="relative z-10 flex flex-row items-start justify-between border-b border-border pb-6">
                   <div>
                     <Badge className="mb-3 bg-secondary text-secondary-foreground border-border hover:bg-secondary">
-                      Upcoming Examination
+                      Latest Assigned Exam
                     </Badge>
-                    <CardTitle className="text-2xl mb-1 text-foreground">{nextAssignment?.exam.title || 'No exam assigned'}</CardTitle>
+                    <CardTitle className="text-2xl mb-1 text-foreground">{latestAssignment?.exam.title || 'No exam assigned'}</CardTitle>
                     <CardDescription className="flex items-center gap-2 text-muted-foreground">
                       <span className="font-mono text-primary bg-secondary px-1.5 rounded border border-border">
-                        {nextAssignment?.exam.id || '---'}
+                        {latestAssignment?.exam.id || '---'}
                       </span>
                     </CardDescription>
                   </div>
                   <div className="text-right">
                     <div className="text-3xl font-bold text-foreground font-mono tracking-tight">
-                      {nextAssignment ? `${nextAssignment.exam.duration}:00` : '00:00'}
+                      {latestAssignment ? `${latestAssignment.exam.duration}:00` : '00:00'}
                     </div>
                     <div className="text-xs text-primary font-medium tracking-wide uppercase mt-1">Duration</div>
                   </div>
@@ -151,14 +153,14 @@ export default function StudentDashboard() {
                       <p className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">Date</p>
                       <div className="flex items-center gap-2 font-medium text-foreground">
                         <CalendarIcon className="h-4 w-4 text-primary" />
-                        {nextAssignment?.exam.start_time ? new Date(nextAssignment.exam.start_time).toLocaleDateString() : 'TBA'}
+                        {latestAssignment?.exam.start_time ? new Date(latestAssignment.exam.start_time).toLocaleDateString() : 'TBA'}
                       </div>
                     </div>
                     <div className="space-y-1">
                       <p className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">Time</p>
                       <div className="flex items-center gap-2 font-medium text-foreground">
                         <Clock className="h-4 w-4 text-primary" />
-                        {nextAssignment?.exam.start_time ? new Date(nextAssignment.exam.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'TBA'}
+                        {latestAssignment?.exam.start_time ? new Date(latestAssignment.exam.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'TBA'}
                       </div>
                     </div>
                     <div className="space-y-1">
@@ -177,14 +179,14 @@ export default function StudentDashboard() {
                     </div>
                   </div>
 
-                  {nextAssignment ? (
+                  {latestAssignment ? (
                     <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-secondary rounded-xl p-4 border border-border">
                       <div className="text-sm">
                         <p className="text-foreground font-medium">Instructions</p>
                         <p className="text-muted-foreground text-xs">Webcam and microphone access required.</p>
                       </div>
                       <Link
-                        to={`/exam/${nextAssignment.exam.id}/live`}
+                        to={`/exam/${latestAssignment.exam.id}/live`}
                         className="w-full sm:w-auto px-8 py-2 rounded-md bg-primary hover:opacity-90 text-primary-foreground text-sm font-medium text-center"
                       >
                         Start Examination

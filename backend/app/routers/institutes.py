@@ -3,7 +3,6 @@ from sqlalchemy.orm import Session
 
 from .. import database, models, schemas
 from ..security import require_role
-from ..utils.key_generator import generate_institute_public_id
 
 router = APIRouter()
 require_super_admin = require_role(["super_admin"])
@@ -14,17 +13,21 @@ require_admin = require_role(["super_admin", "institute_admin"])
 def create_institute(
     institute: schemas.InstituteCreate,
     db: Session = Depends(database.get_db),
-    current_user: models.Admin | models.Student = Depends(require_super_admin),
+    current_user = Depends(require_super_admin),
 ):
-    existing = db.query(models.Institute).filter(models.Institute.name == institute.name).first()
+    existing = (
+        db.query(models.Institute)
+        .filter(models.Institute.institute_code == institute.institute_code.upper())
+        .first()
+    )
     if existing:
-        raise HTTPException(status_code=409, detail="Institute already exists")
+        raise HTTPException(status_code=409, detail="Institute code already exists")
 
     new_institute = models.Institute(
-        id=generate_institute_public_id(db, institute.name),
+        institute_code=institute.institute_code.upper(),
         name=institute.name,
-        plan=institute.plan,
-        config=institute.config,
+        address=institute.address,
+        contact_email=institute.contact_email,
     )
     db.add(new_institute)
     db.commit()
@@ -35,10 +38,9 @@ def create_institute(
 @router.get("/institutes/", response_model=list[schemas.InstituteOut])
 def list_institutes(
     db: Session = Depends(database.get_db),
-    current_user: models.Admin | models.Student = Depends(require_admin),
+    current_user = Depends(require_admin),
 ):
-    role_value = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
-    if role_value == "super_admin":
+    if current_user.role == "super_admin":
         return db.query(models.Institute).all()
 
     if current_user.institute_id is None:

@@ -4,14 +4,13 @@ import api from '@/lib/api';
 interface Exam {
   id: string;
   title: string;
-  duration: number;
-  proctor_config: { level?: string };
+  duration_minutes: number;
 }
 
-interface Department {
+interface Faculty {
   id: string;
   name: string;
-  code: string;
+  dept_code: string;
 }
 
 interface Question {
@@ -30,14 +29,16 @@ interface Question {
 export default function ExamSetupPage() {
   const [exams, setExams] = useState<Exam[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
-  const [departments, setDepartments] = useState<Department[]>([]);
+  const [faculties, setFaculties] = useState<Faculty[]>([]);
 
-  const [departmentId, setDepartmentId] = useState('');
+  const [facultyId, setFacultyId] = useState('');
+  const [subjectCode, setSubjectCode] = useState('');
+  const [examType, setExamType] = useState('MID');
+  const [examYear, setExamYear] = useState(new Date().getFullYear().toString().slice(-2));
   const [title, setTitle] = useState('');
   const [duration, setDuration] = useState(60);
-  const [level, setLevel] = useState('strict');
-  const [startTime, setStartTime] = useState('');
-  const [endTime, setEndTime] = useState('');
+  const [passingMarks, setPassingMarks] = useState(40);
+  const [scheduledTime, setScheduledTime] = useState('');
 
   const [questionExamId, setQuestionExamId] = useState<string>('');
   const [questionType, setQuestionType] = useState('MCQ');
@@ -49,7 +50,7 @@ export default function ExamSetupPage() {
 
   useEffect(() => {
     fetchExams();
-    fetchDepartments();
+    fetchFaculties();
     fetchQuestions();
   }, []);
 
@@ -64,9 +65,9 @@ export default function ExamSetupPage() {
     setExams(response.data);
   };
 
-  const fetchDepartments = async () => {
-    const response = await api.get('/departments/');
-    setDepartments(response.data);
+  const fetchFaculties = async () => {
+    const response = await api.get('/faculties/');
+    setFaculties(response.data);
   };
 
   const fetchQuestions = async () => {
@@ -76,25 +77,21 @@ export default function ExamSetupPage() {
 
   const handleCreateExam = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!departmentId) return;
+    if (!facultyId) return;
     await api.post('/exams/', {
-      department_id: departmentId,
+      faculty_id: facultyId,
+      subject_code: subjectCode,
+      exam_type: examType,
+      exam_year: examYear,
       title,
       duration: Number(duration),
-      start_time: startTime ? new Date(startTime).toISOString() : null,
-      end_time: endTime ? new Date(endTime).toISOString() : null,
-      proctor_config: {
-        level,
-        strict_mode: level === 'strict',
-      },
-      random_rules: {
-        shuffle_questions: true,
-      },
+      passing_marks: Number(passingMarks),
+      scheduled_time: scheduledTime ? new Date(scheduledTime).toISOString() : null,
     });
     setTitle('');
-    setStartTime('');
-    setEndTime('');
-    setDepartmentId('');
+    setSubjectCode('');
+    setScheduledTime('');
+    setFacultyId('');
     fetchExams();
   };
 
@@ -151,20 +148,40 @@ export default function ExamSetupPage() {
           <h2 className="text-lg font-semibold text-foreground mb-4">Create Exam</h2>
           <form onSubmit={handleCreateExam} className="space-y-4">
             <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">Department</label>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Faculty</label>
               <select
                 className="w-full h-10 px-3 rounded-lg bg-secondary border border-border text-sm"
-                value={departmentId}
-                onChange={(e) => setDepartmentId(e.target.value)}
+                value={facultyId}
+                onChange={(e) => setFacultyId(e.target.value)}
                 required
               >
-                <option value="">Select department</option>
-                {departments.map((department) => (
-                  <option key={department.id} value={department.id}>
-                    {department.name} ({department.code})
+                <option value="">Select faculty</option>
+                {faculties.map((faculty) => (
+                  <option key={faculty.id} value={faculty.id}>
+                    {faculty.name} ({faculty.dept_code})
                   </option>
                 ))}
               </select>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">Subject Code</label>
+                <input
+                  className="w-full h-10 px-3 rounded-lg bg-secondary border border-border text-sm"
+                  value={subjectCode}
+                  onChange={(e) => setSubjectCode(e.target.value.toUpperCase())}
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">Exam Type</label>
+                <input
+                  className="w-full h-10 px-3 rounded-lg bg-secondary border border-border text-sm"
+                  value={examType}
+                  onChange={(e) => setExamType(e.target.value.toUpperCase())}
+                  required
+                />
+              </div>
             </div>
             <div>
               <label className="block text-xs font-medium text-muted-foreground mb-1">Title</label>
@@ -186,21 +203,22 @@ export default function ExamSetupPage() {
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">Start Time</label>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Passing Marks</label>
               <input
-                type="datetime-local"
+                type="number"
                 className="w-full h-10 px-3 rounded-lg bg-secondary border border-border text-sm"
-                value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
+                value={passingMarks}
+                onChange={(e) => setPassingMarks(Number(e.target.value))}
+                required
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">End Time</label>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Scheduled Time</label>
               <input
                 type="datetime-local"
                 className="w-full h-10 px-3 rounded-lg bg-secondary border border-border text-sm"
-                value={endTime}
-                onChange={(e) => setEndTime(e.target.value)}
+                value={scheduledTime}
+                onChange={(e) => setScheduledTime(e.target.value)}
               />
             </div>
             <button className="h-10 px-4 rounded-lg bg-primary text-primary-foreground text-sm font-semibold">
@@ -319,7 +337,7 @@ export default function ExamSetupPage() {
               exams.map((exam) => (
                 <div key={exam.id} className="border-b border-border/30 pb-2 last:border-0">
                   <p className="text-sm font-medium text-foreground">{exam.title}</p>
-                  <p className="text-xs text-muted-foreground">{exam.duration} min · {exam.proctor_config?.level || 'N/A'}</p>
+                  <p className="text-xs text-muted-foreground">{exam.duration_minutes} min</p>
                 </div>
               ))
             )}

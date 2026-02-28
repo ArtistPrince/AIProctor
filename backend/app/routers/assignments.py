@@ -1,8 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-import uuid
 
 from .. import database, models, schemas
 from ..security import require_role
@@ -15,98 +12,107 @@ require_admin = require_role(["super_admin", "institute_admin", "exam_admin"])
 def create_assignment(
     assignment: schemas.ExamAssignmentCreate,
     db: Session = Depends(database.get_db),
-    current_user: models.Admin | models.Student = Depends(require_admin),
+    current_user=Depends(require_admin),
 ):
-    if not assignment.batch_id and not assignment.student_id:
-        raise HTTPException(status_code=400, detail="Provide batch_id or student_id")
-    if assignment.batch_id and assignment.student_id:
-        raise HTTPException(status_code=400, detail="Provide only one of batch_id or student_id")
-
     exam = db.query(models.Exam).filter(models.Exam.id == assignment.exam_id).first()
     if not exam:
         raise HTTPException(status_code=404, detail="Exam not found")
 
-    if assignment.batch_id:
-        batch = db.query(models.Batch).filter(models.Batch.id == assignment.batch_id).first()
-        if not batch:
-            raise HTTPException(status_code=404, detail="Batch not found")
+    batch = db.query(models.Batch).filter(models.Batch.id == assignment.batch_id).first()
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found")
 
-    if assignment.student_id:
-        student = db.query(models.Student).filter(models.Student.id == assignment.student_id).first()
-        if not student:
-            raise HTTPException(status_code=404, detail="Student not found")
+    if str(exam.institute_id) != str(batch.institute_id):
+        raise HTTPException(status_code=400, detail="Exam and batch belong to different institutes")
+
+    if current_user.role != "super_admin" and str(exam.institute_id) != str(current_user.institute_id):
+        raise HTTPException(status_code=403, detail="Cannot assign exam outside your institute")
 
     new_assignment = models.ExamAssignment(
-        id=str(uuid.uuid4()),
-        exam_id=assignment.exam_id,
-        batch_id=assignment.batch_id,
-        student_id=assignment.student_id,
+        institute_id=exam.institute_id,
+        exam_id=exam.id,
+        batch_id=batch.id,
     )
     db.add(new_assignment)
-    try:
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(status_code=400, detail="Invalid assignment payload") from exc
-    except SQLAlchemyError as exc:
-        db.rollback()
-        raise HTTPException(status_code=400, detail="Failed to create assignment") from exc
+    db.commit()
     db.refresh(new_assignment)
-    return new_assignment
+    return schemas.ExamAssignmentOut(
+        id=str(new_assignment.id),
+        institute_id=str(new_assignment.institute_id),
+        exam_id=str(new_assignment.exam_id),
+        batch_id=str(new_assignment.batch_id),
+        student_id=None,
+        assigned_at=new_assignment.assigned_at,
+    )
 
 
 @router.get("/assignments/", response_model=list[schemas.ExamAssignmentOut])
 def list_assignments(
     db: Session = Depends(database.get_db),
-    current_user: models.Admin | models.Student = Depends(require_admin),
+    current_user=Depends(require_admin),
 ):
-    return db.query(models.ExamAssignment).all()
+    if current_user.role == "super_admin":
+        rows = db.query(models.ExamAssignment).all()
+    else:
+        rows = db.query(models.ExamAssignment).filter(models.ExamAssignment.institute_id == current_user.institute_id).all()
+
+    return [
+        schemas.ExamAssignmentOut(
+            id=str(row.id),
+            institute_id=str(row.institute_id),
+            exam_id=str(row.exam_id),
+            batch_id=str(row.batch_id),
+            student_id=None,
+            assigned_at=row.assigned_at,
+        )
+        for row in rows
+    ]
 
 
 @router.get("/assignments/me", response_model=list[schemas.ExamAssignmentWithExam])
 def list_my_assignments(
     db: Session = Depends(database.get_db),
-    current_user: models.Admin | models.Student = Depends(require_role(["student", "proctor", "exam_admin", "institute_admin", "super_admin"]) ),
+    current_user=Depends(require_role(["student", "proctor", "exam_admin", "institute_admin", "super_admin"])),
 ):
-    candidate_student_ids = {str(current_user.id)}
-    candidate_batch_ids = set()
-    if getattr(current_user, "email", None):
-        linked_students = db.query(models.Student).filter(
-            or_(
-                models.Student.id == str(current_user.id),
-                models.Student.email == current_user.email,
-            )
+    if current_user.role == "student":
+        student = db.query(models.Student).filter(models.Student.id == current_user.id).first()
+        if not student:
+            return []
+        assignments = db.query(models.ExamAssignment).filter(
+            models.ExamAssignment.institute_id == student.institute_id,
+            models.ExamAssignment.batch_id == student.batch_id,
         ).all()
-        candidate_student_ids.update(str(student.id) for student in linked_students)
-        candidate_batch_ids.update(str(student.batch_id) for student in linked_students if getattr(student, "batch_id", None))
+    elif current_user.role == "super_admin":
+        assignments = db.query(models.ExamAssignment).all()
+    else:
+        assignments = db.query(models.ExamAssignment).filter(models.ExamAssignment.institute_id == current_user.institute_id).all()
 
-    candidate_member_values = set(candidate_student_ids)
-    if getattr(current_user, "email", None):
-        candidate_member_values.add(current_user.email)
-
-    batch_ids = set(candidate_batch_ids)
-    all_batches = db.query(models.Batch).all()
-    for batch in all_batches:
-        members = batch.members or []
-        if any(str(member) in candidate_member_values for member in members):
-            batch_ids.add(batch.id)
-
-    filters = [models.ExamAssignment.student_id.in_(list(candidate_student_ids))]
-    if batch_ids:
-        filters.append(models.ExamAssignment.batch_id.in_(list(batch_ids)))
-
-    assignments = db.query(models.ExamAssignment).filter(or_(*filters)).all()
-    
-    # Load exam details for each assignment
-    result = []
+    result: list[schemas.ExamAssignmentWithExam] = []
     for assignment in assignments:
         exam = db.query(models.Exam).filter(models.Exam.id == assignment.exam_id).first()
-        if exam:
-            result.append({
-                "id": assignment.id,
-                "exam_id": assignment.exam_id,
-                "batch_id": assignment.batch_id,
-                "student_id": assignment.student_id,
-                "exam": exam
-            })
+        if not exam:
+            continue
+        result.append(
+            schemas.ExamAssignmentWithExam(
+                id=str(assignment.id),
+                exam_id=str(assignment.exam_id),
+                batch_id=str(assignment.batch_id),
+                student_id=None,
+                exam=schemas.ExamOut(
+                    id=str(exam.id),
+                    institute_id=str(exam.institute_id),
+                    faculty_id=str(exam.faculty_id),
+                    subject_code=exam.subject_code,
+                    exam_type=exam.exam_type,
+                    exam_year=exam.exam_year,
+                    exam_code=exam.exam_code,
+                    title=exam.title,
+                    duration_minutes=exam.duration_minutes,
+                    passing_marks=exam.passing_marks,
+                    scheduled_time=exam.scheduled_time,
+                    created_at=exam.created_at,
+                    duration=exam.duration_minutes,
+                ),
+            )
+        )
     return result

@@ -2,137 +2,202 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
 
 from .. import database, models, schemas
 from ..security import require_role
-from ..utils.key_generator import generate_session_public_id
 
 router = APIRouter()
 require_admin = require_role(["super_admin", "institute_admin", "exam_admin", "proctor"])
+
+
+def _map_status(status: str | None) -> str:
+    if not status:
+        return "completed"
+    value = status.lower()
+    if value in {"ongoing", "active", "not_started", "started"}:
+        return "in_progress"
+    if value in {"submitted", "completed"}:
+        return "completed"
+    if value in {"disqualified", "terminated", "flagged"}:
+        return "terminated"
+    if value in {"missed"}:
+        return "missed"
+    return value
 
 
 @router.post("/sessions/", response_model=schemas.ExamSessionOut, status_code=201)
 def create_session(
     payload: schemas.ExamSessionCreate,
     db: Session = Depends(database.get_db),
-    current_user: models.Admin | models.Student = Depends(require_role(["super_admin", "institute_admin", "exam_admin", "proctor", "student"])),
+    current_user=Depends(require_role(["super_admin", "institute_admin", "exam_admin", "proctor", "student"])),
 ):
-    try:
-        student = db.query(models.Student).filter(models.Student.id == payload.student_id).first()
-        if not student:
-            raise HTTPException(status_code=404, detail="Student not found")
+    student = db.query(models.Student).filter(models.Student.id == payload.student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
 
-        exam = db.query(models.Exam).filter(models.Exam.id == payload.exam_id).first()
-        if not exam:
-            raise HTTPException(status_code=404, detail="Exam not found")
+    exam = db.query(models.Exam).filter(models.Exam.id == payload.exam_id).first()
+    if not exam:
+        raise HTTPException(status_code=404, detail="Exam not found")
 
-        # Convert status string to enum
-        status = payload.status
-        if status and isinstance(status, str):
-            try:
-                status = models.SessionStatus(status)
-            except ValueError:
-                # Use default if invalid status provided
-                status = models.SessionStatus.SUBMITTED
-        else:
-            status = models.SessionStatus.SUBMITTED
+    if str(student.institute_id) != str(exam.institute_id):
+        raise HTTPException(status_code=400, detail="Student and exam belong to different institutes")
 
-        public_id = generate_session_public_id(db, student.id, exam.id)
-        session = models.ExamSession(
-            id=public_id,
-            student_id=payload.student_id,
-            exam_id=payload.exam_id,
-            status=status,
-            score=payload.score,
-            integrity=payload.integrity,
-        )
-        db.add(session)
-        db.commit()
-        db.refresh(session)
-        return session
-    except HTTPException:
-        raise
-    except Exception as e:
-        db.rollback()
-        import traceback
-        print(f"Error creating session: {str(e)}")
-        print(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Failed to save exam session: {str(e)}")
+    status = _map_status(payload.status)
+    now = datetime.now(timezone.utc)
+    session = models.ExamSession(
+        institute_id=exam.institute_id,
+        student_id=student.id,
+        exam_id=exam.id,
+        session_status=status,
+        started_at=now if status in ("in_progress", "completed", "terminated") else None,
+        completed_at=now if status in ("completed", "terminated", "missed") else None,
+        final_score=payload.score,
+        violation_found=status == "terminated",
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    return schemas.ExamSessionOut(
+        id=str(session.id),
+        institute_id=str(session.institute_id),
+        student_id=str(session.student_id),
+        exam_id=str(session.exam_id),
+        status=session.session_status,
+        score=session.final_score,
+        integrity=payload.integrity,
+        started_at=session.started_at,
+        completed_at=session.completed_at,
+        violation_found=session.violation_found,
+        mongo_log_ref=session.mongo_log_ref,
+        s3_media_prefix=session.s3_media_prefix,
+    )
 
 
 @router.get("/sessions/", response_model=list[schemas.ExamSessionOut])
 def list_sessions(
     db: Session = Depends(database.get_db),
-    current_user: models.Admin | models.Student = Depends(require_admin),
+    current_user=Depends(require_admin),
 ):
-    role_value = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
-    query = db.query(models.ExamSession)
-    if role_value != "super_admin" and current_user.institute_id is not None:
-        query = query.join(models.Exam, models.Exam.id == models.ExamSession.exam_id)
-        query = query.filter(models.Exam.institute_id == current_user.institute_id)
-    return query.all()
+    if current_user.role == "super_admin":
+        rows = db.query(models.ExamSession).all()
+    else:
+        rows = db.query(models.ExamSession).filter(models.ExamSession.institute_id == current_user.institute_id).all()
+
+    return [
+        schemas.ExamSessionOut(
+            id=str(row.id),
+            institute_id=str(row.institute_id),
+            student_id=str(row.student_id),
+            exam_id=str(row.exam_id),
+            status=row.session_status,
+            score=row.final_score,
+            integrity=None,
+            started_at=row.started_at,
+            completed_at=row.completed_at,
+            violation_found=row.violation_found,
+            mongo_log_ref=row.mongo_log_ref,
+            s3_media_prefix=row.s3_media_prefix,
+        )
+        for row in rows
+    ]
 
 
 @router.get("/sessions/me", response_model=list[schemas.ExamSessionOut])
 def list_my_sessions(
     db: Session = Depends(database.get_db),
-    current_user: models.Admin | models.Student = Depends(require_role(["student", "proctor", "exam_admin", "institute_admin", "super_admin"])),
+    current_user=Depends(require_role(["student", "proctor", "exam_admin", "institute_admin", "super_admin"])),
 ):
-    return db.query(models.ExamSession).filter(models.ExamSession.student_id == current_user.id).all()
+    if current_user.role == "student":
+        rows = db.query(models.ExamSession).filter(models.ExamSession.student_id == current_user.id).all()
+    elif current_user.role == "super_admin":
+        rows = db.query(models.ExamSession).all()
+    else:
+        rows = db.query(models.ExamSession).filter(models.ExamSession.institute_id == current_user.institute_id).all()
+
+    return [
+        schemas.ExamSessionOut(
+            id=str(row.id),
+            institute_id=str(row.institute_id),
+            student_id=str(row.student_id),
+            exam_id=str(row.exam_id),
+            status=row.session_status,
+            score=row.final_score,
+            integrity=None,
+            started_at=row.started_at,
+            completed_at=row.completed_at,
+            violation_found=row.violation_found,
+            mongo_log_ref=row.mongo_log_ref,
+            s3_media_prefix=row.s3_media_prefix,
+        )
+        for row in rows
+    ]
 
 
 @router.get("/sessions/exam/{exam_id}", response_model=list[schemas.ExamSessionOut])
 def list_exam_attempts(
     exam_id: str,
     db: Session = Depends(database.get_db),
-    current_user: models.Admin | models.Student = Depends(require_role(["super_admin", "institute_admin", "exam_admin", "proctor"])),
+    current_user=Depends(require_role(["super_admin", "institute_admin", "exam_admin", "proctor"])),
 ):
-    """Get all exam attempts for a specific exam with student details."""
     exam = db.query(models.Exam).filter(models.Exam.id == exam_id).first()
     if not exam:
         raise HTTPException(status_code=404, detail="Exam not found")
-    
-    role_value = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
-    if role_value not in ["super_admin"] and current_user.institute_id != exam.institute_id:
+
+    if current_user.role != "super_admin" and str(current_user.institute_id) != str(exam.institute_id):
         raise HTTPException(status_code=403, detail="Unauthorized to view this exam's attempts")
-    
-    sessions = db.query(models.ExamSession).filter(models.ExamSession.exam_id == exam_id).all()
-    return sessions
+
+    rows = db.query(models.ExamSession).filter(models.ExamSession.exam_id == exam_id).all()
+    return [
+        schemas.ExamSessionOut(
+            id=str(row.id),
+            institute_id=str(row.institute_id),
+            student_id=str(row.student_id),
+            exam_id=str(row.exam_id),
+            status=row.session_status,
+            score=row.final_score,
+            integrity=None,
+            started_at=row.started_at,
+            completed_at=row.completed_at,
+            violation_found=row.violation_found,
+            mongo_log_ref=row.mongo_log_ref,
+            s3_media_prefix=row.s3_media_prefix,
+        )
+        for row in rows
+    ]
 
 
 @router.get("/sessions/exam/{exam_id}/details", response_model=list[dict])
 def list_exam_attempts_with_details(
     exam_id: str,
     db: Session = Depends(database.get_db),
-    current_user: models.Admin | models.Student = Depends(require_role(["super_admin", "institute_admin", "exam_admin", "proctor"])),
+    current_user=Depends(require_role(["super_admin", "institute_admin", "exam_admin", "proctor"])),
 ):
-    """Get all exam attempts with full student details for a specific exam (for dashboards)."""
     exam = db.query(models.Exam).filter(models.Exam.id == exam_id).first()
     if not exam:
         raise HTTPException(status_code=404, detail="Exam not found")
-    
-    role_value = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
-    if role_value not in ["super_admin"] and current_user.institute_id != exam.institute_id:
+
+    if current_user.role != "super_admin" and str(current_user.institute_id) != str(exam.institute_id):
         raise HTTPException(status_code=403, detail="Unauthorized to view this exam's attempts")
-    
-    sessions = db.query(models.ExamSession).filter(models.ExamSession.exam_id == exam_id).all()
-    
+
+    rows = db.query(models.ExamSession).filter(models.ExamSession.exam_id == exam_id).all()
     result = []
-    for session in sessions:
-        student = db.query(models.Student).filter(models.Student.id == session.student_id).first()
-        if student:
-            result.append({
-                "id": session.id,
-                "student_id": session.student_id,
+    for row in rows:
+        student = db.query(models.Student).filter(models.Student.id == row.student_id).first()
+        if not student:
+            continue
+        result.append(
+            {
+                "id": str(row.id),
+                "student_id": str(row.student_id),
                 "student_email": student.email,
-                "student_name": student.email.split("@")[0],  # Extract name from email
-                "exam_id": session.exam_id,
-                "status": session.status.value if hasattr(session.status, "value") else str(session.status),
-                "score": session.score,
-                "integrity": session.integrity,
-            })
-    
+                "student_name": student.name,
+                "exam_id": str(row.exam_id),
+                "status": row.session_status,
+                "score": row.final_score,
+                "integrity": None,
+            }
+        )
     return result
 
 
@@ -140,67 +205,69 @@ def list_exam_attempts_with_details(
 def mark_exam_missed(
     exam_id: str,
     db: Session = Depends(database.get_db),
-    current_user: models.Admin | models.Student = Depends(require_role(["student"]))
+    current_user=Depends(require_role(["student"])),
 ):
     exam = db.query(models.Exam).filter(models.Exam.id == exam_id).first()
     if not exam:
         raise HTTPException(status_code=404, detail="Exam not found")
 
-    candidate_student_ids = {str(current_user.id)}
-    candidate_batch_ids = set()
-    if getattr(current_user, "email", None):
-        linked_students = db.query(models.Student).filter(
-            or_(
-                models.Student.id == str(current_user.id),
-                models.Student.email == current_user.email,
-            )
-        ).all()
-        candidate_student_ids.update(str(student.id) for student in linked_students)
-        candidate_batch_ids.update(str(student.batch_id) for student in linked_students if getattr(student, "batch_id", None))
-
-    candidate_member_values = set(candidate_student_ids)
-    if getattr(current_user, "email", None):
-        candidate_member_values.add(current_user.email)
-
-    batch_ids = set(candidate_batch_ids)
-    all_batches = db.query(models.Batch).all()
-    for batch in all_batches:
-        members = batch.members or []
-        if any(str(member) in candidate_member_values for member in members):
-            batch_ids.add(batch.id)
-
-    assignment_filters = [models.ExamAssignment.student_id.in_(list(candidate_student_ids))]
-    if batch_ids:
-        assignment_filters.append(models.ExamAssignment.batch_id.in_(list(batch_ids)))
+    student = db.query(models.Student).filter(models.Student.id == current_user.id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student profile not found")
 
     assignment = db.query(models.ExamAssignment).filter(
-        (models.ExamAssignment.exam_id == exam_id) &
-        or_(*assignment_filters)
+        models.ExamAssignment.institute_id == student.institute_id,
+        models.ExamAssignment.exam_id == exam.id,
+        models.ExamAssignment.batch_id == student.batch_id,
     ).first()
     if not assignment:
         raise HTTPException(status_code=403, detail="Exam not assigned")
 
-    reference_time = exam.start_time or exam.end_time
-    now = datetime.now(timezone.utc) if reference_time and getattr(reference_time, "tzinfo", None) else datetime.utcnow()
-    if exam.end_time and now <= exam.end_time:
-        raise HTTPException(status_code=403, detail="Exam window has not closed yet")
-
     existing = db.query(models.ExamSession).filter(
-        models.ExamSession.student_id == str(current_user.id),
-        models.ExamSession.exam_id == exam_id,
+        models.ExamSession.institute_id == student.institute_id,
+        models.ExamSession.student_id == student.id,
+        models.ExamSession.exam_id == exam.id,
     ).first()
     if existing:
-        return existing
+        return schemas.ExamSessionOut(
+            id=str(existing.id),
+            institute_id=str(existing.institute_id),
+            student_id=str(existing.student_id),
+            exam_id=str(existing.exam_id),
+            status=existing.session_status,
+            score=existing.final_score,
+            integrity=None,
+            started_at=existing.started_at,
+            completed_at=existing.completed_at,
+            violation_found=existing.violation_found,
+            mongo_log_ref=existing.mongo_log_ref,
+            s3_media_prefix=existing.s3_media_prefix,
+        )
 
+    now = datetime.now(timezone.utc)
     session = models.ExamSession(
-        id=generate_session_public_id(db, str(current_user.id), exam_id),
-        student_id=str(current_user.id),
-        exam_id=exam_id,
-        status=models.SessionStatus.MISSED,
-        score=0,
-        integrity=0,
+        institute_id=student.institute_id,
+        student_id=student.id,
+        exam_id=exam.id,
+        session_status="missed",
+        completed_at=now,
+        final_score=0,
+        violation_found=False,
     )
     db.add(session)
     db.commit()
     db.refresh(session)
-    return session
+    return schemas.ExamSessionOut(
+        id=str(session.id),
+        institute_id=str(session.institute_id),
+        student_id=str(session.student_id),
+        exam_id=str(session.exam_id),
+        status=session.session_status,
+        score=session.final_score,
+        integrity=None,
+        started_at=session.started_at,
+        completed_at=session.completed_at,
+        violation_found=session.violation_found,
+        mongo_log_ref=session.mongo_log_ref,
+        s3_media_prefix=session.s3_media_prefix,
+    )

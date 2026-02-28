@@ -8,49 +8,37 @@ if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
 from app.database import SessionLocal
-from app.models import User
+from app.models import SuperAdmin
 from app.security import get_password_hash
 
 
-def seed_admin(email: str, password: str, role: str) -> int:
+def seed_super_admin(email: str, password: str) -> int:
     db = SessionLocal()
     try:
-        existing = db.query(User).filter(User.email == email).first()
+        existing = db.query(SuperAdmin).filter(SuperAdmin.email == email).first()
         if existing:
-            print("User already exists:", email)
-            return 1
+            print(f"Super admin already exists: {email}")
+            return 0
 
-        normalized_role = role.lower()
-        user = User(
-            email=email,
-            password_hash=get_password_hash(password),
-            role=normalized_role,
-        )
-        db.add(user)
+        admin = SuperAdmin(email=email, password_hash=get_password_hash(password))
+        db.add(admin)
         db.commit()
-        db.refresh(user)
-        print("Created user:", user.email, "role:", user.role)
+        print(f"Created super admin: {email}")
         return 0
     finally:
         db.close()
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Seed an initial admin user.")
+    parser = argparse.ArgumentParser(description="Seed a super admin user.")
     parser.add_argument("--email", required=True)
     parser.add_argument("--password", required=True)
-    parser.add_argument(
-        "--role",
-        default="super_admin",
-        choices=["super_admin", "institute_admin", "exam_admin", "proctor", "student"],
-    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    exit_code = seed_admin(args.email, args.password, args.role)
-    sys.exit(exit_code)
+    sys.exit(seed_super_admin(args.email, args.password))
 
 
 if __name__ == "__main__":
