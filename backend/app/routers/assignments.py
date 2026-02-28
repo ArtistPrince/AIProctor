@@ -40,8 +40,11 @@ def create_assignment(
         id=str(new_assignment.id),
         institute_id=str(new_assignment.institute_id),
         exam_id=str(new_assignment.exam_id),
+        exam_code=exam.exam_code,
         batch_id=str(new_assignment.batch_id),
+        batch_code=batch.batch_code,
         student_id=None,
+        student_code=None,
         assigned_at=new_assignment.assigned_at,
     )
 
@@ -56,17 +59,24 @@ def list_assignments(
     else:
         rows = db.query(models.ExamAssignment).filter(models.ExamAssignment.institute_id == current_user.institute_id).all()
 
-    return [
-        schemas.ExamAssignmentOut(
-            id=str(row.id),
-            institute_id=str(row.institute_id),
-            exam_id=str(row.exam_id),
-            batch_id=str(row.batch_id),
-            student_id=None,
-            assigned_at=row.assigned_at,
+    result: list[schemas.ExamAssignmentOut] = []
+    for row in rows:
+        exam = db.query(models.Exam).filter(models.Exam.id == row.exam_id).first()
+        batch = db.query(models.Batch).filter(models.Batch.id == row.batch_id).first()
+        result.append(
+            schemas.ExamAssignmentOut(
+                id=str(row.id),
+                institute_id=str(row.institute_id),
+                exam_id=str(row.exam_id),
+                exam_code=exam.exam_code if exam else None,
+                batch_id=str(row.batch_id),
+                batch_code=batch.batch_code if batch else None,
+                student_id=None,
+                student_code=None,
+                assigned_at=row.assigned_at,
+            )
         )
-        for row in rows
-    ]
+    return result
 
 
 @router.get("/assignments/me", response_model=list[schemas.ExamAssignmentWithExam])
@@ -92,12 +102,15 @@ def list_my_assignments(
         exam = db.query(models.Exam).filter(models.Exam.id == assignment.exam_id).first()
         if not exam:
             continue
+        batch = db.query(models.Batch).filter(models.Batch.id == assignment.batch_id).first()
         result.append(
             schemas.ExamAssignmentWithExam(
                 id=str(assignment.id),
                 exam_id=str(assignment.exam_id),
                 batch_id=str(assignment.batch_id),
+                batch_code=batch.batch_code if batch else None,
                 student_id=None,
+                student_code=None,
                 exam=schemas.ExamOut(
                     id=str(exam.id),
                     institute_id=str(exam.institute_id),
@@ -110,6 +123,7 @@ def list_my_assignments(
                     duration_minutes=exam.duration_minutes,
                     passing_marks=exam.passing_marks,
                     scheduled_time=exam.scheduled_time,
+                    end_time=exam.end_time,
                     created_at=exam.created_at,
                     duration=exam.duration_minutes,
                 ),

@@ -60,7 +60,27 @@ async def login(
 
 
 @router.get("/me", response_model=schemas.UserOut)
-def get_me(current_user=Depends(get_current_user)):
+def get_me(
+    db: Session = Depends(database.get_db),
+    current_user=Depends(get_current_user),
+):
+    batch_code = None
+    batch_year = None
+    course_name = None
+    roll_no = None
+    section = None
+
+    if current_user.role == "student":
+        student = db.query(models.Student).filter(models.Student.id == current_user.id).first()
+        if student:
+            roll_no = student.roll_no
+            section = student.section
+            batch = db.query(models.Batch).filter(models.Batch.id == student.batch_id).first()
+            if batch:
+                batch_code = batch.batch_code
+                batch_year = batch.batch_year
+                course_name = batch.course_name
+
     return schemas.UserOut(
         id=current_user.id,
         name=current_user.name,
@@ -69,6 +89,11 @@ def get_me(current_user=Depends(get_current_user)):
         institute_id=current_user.institute_id,
         batch_id=current_user.batch_id,
         code=current_user.code,
+        batch_code=batch_code,
+        batch_year=batch_year,
+        course_name=course_name,
+        roll_no=roll_no,
+        section=section,
     )
 
 

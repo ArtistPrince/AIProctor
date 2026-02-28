@@ -1,38 +1,29 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Bell, LogOut, User, Trophy, TrendingUp, AlertTriangle } from 'lucide-react';
+import { Bell, LogOut, User, Trophy } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import api from '@/lib/api';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 
 interface ExamResult {
   id: string;
+  session_code?: string;
   exam_id: string;
+  exam_code?: string;
+  exam_title?: string;
   student_id: string;
+  student_code?: string;
   status: string;
   score: number | null;
-  integrity: number | null;
-  violation_logs_id: string | null;
   attempted_at: string | null;
   submitted_at: string | null;
-}
-
-interface Exam {
-  id: string;
-  title: string;
-}
-
-interface ExamAssignmentWithExam {
-  exam_id: string;
-  exam: Exam;
 }
 
 export default function StudentResultsPage() {
   const { user, logout } = useAuthStore();
   const [results, setResults] = useState<ExamResult[]>([]);
-  const [exams, setExams] = useState<Map<string, Exam>>(new Map());
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -42,25 +33,11 @@ export default function StudentResultsPage() {
   const fetchResults = async () => {
     try {
       setLoading(true);
-      const [sessionsRes, assignmentsRes] = await Promise.all([
-        api.get('/sessions/me'),
-        api.get('/assignments/me'),
-      ]);
-
-      // Filter submitted and missed exams
-      const submitted = sessionsRes.data.filter(
-        (session: ExamResult) => session.status === 'submitted' || session.status === 'missed'
+      const response = await api.get('/sessions/me/details');
+      const resultRows = (response.data || []).filter(
+        (session: ExamResult) => session.status === 'submitted'
       );
-      setResults(submitted);
-
-      // Use student-allowed assignments endpoint to get exam titles
-      const examMap = new Map<string, Exam>();
-      assignmentsRes.data.forEach((assignment: ExamAssignmentWithExam) => {
-        if (assignment.exam) {
-          examMap.set(assignment.exam.id, assignment.exam);
-        }
-      });
-      setExams(examMap);
+      setResults(resultRows);
     } catch (error) {
       console.error('Failed to fetch results:', error);
     } finally {
@@ -72,13 +49,6 @@ export default function StudentResultsPage() {
     if (score === null) return 'text-muted-foreground';
     if (score >= 80) return 'text-green-600';
     if (score >= 60) return 'text-yellow-600';
-    return 'text-red-600';
-  };
-
-  const getIntegrityColor = (integrity: number | null) => {
-    if (integrity === null) return 'text-muted-foreground';
-    if (integrity >= 80) return 'text-green-600';
-    if (integrity >= 60) return 'text-yellow-600';
     return 'text-red-600';
   };
 
@@ -121,7 +91,7 @@ export default function StudentResultsPage() {
       <main className="container mx-auto px-4 py-8 space-y-8">
         <div>
           <h1 className="text-3xl font-bold text-foreground tracking-tight">Exam Results</h1>
-          <p className="text-muted-foreground mt-1">Review your submitted exam scores and integrity metrics.</p>
+          <p className="text-muted-foreground mt-1">Review your submitted exam marks.</p>
         </div>
 
         {loading ? (
@@ -146,36 +116,20 @@ export default function StudentResultsPage() {
                     <div className="flex-1 space-y-2">
                       <div className="flex items-center gap-3">
                         <h3 className="text-lg font-semibold text-foreground">
-                          <span className="font-bold">{exams.get(result.exam_id)?.title || 'Exam'}</span>
-                          <span className="text-muted-foreground font-mono text-sm ml-2">({result.exam_id.slice(0, 8)})</span>
+                          <span className="font-bold">{result.exam_title || 'Exam'}</span>
                         </h3>
-                        {result.status === 'missed' ? (
-                          <Badge className="bg-amber-100 text-amber-800 border-amber-200">Missed</Badge>
-                        ) : (
-                          <Badge className="bg-green-100 text-green-800 border-green-200">Submitted</Badge>
-                        )}
-                        {result.violation_logs_id && (
-                          <Badge className="bg-red-100 text-red-800 border-red-200 flex items-center gap-1">
-                            <AlertTriangle className="h-3 w-3" /> Violations
-                          </Badge>
-                        )}
+                        <Badge className="bg-green-100 text-green-800 border-green-200">Submitted</Badge>
                       </div>
                       <p className="text-xs text-muted-foreground">
                         {result.submitted_at ? new Date(result.submitted_at).toLocaleString() : 'Recently'}
                       </p>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-6 text-right">
+                    <div className="text-right">
                       <div>
-                        <p className="text-xs text-muted-foreground uppercase tracking-wider font-semibold mb-1">Score</p>
+                        <p className="text-xs text-muted-foreground uppercase tracking-wider font-semibold mb-1">Marks</p>
                         <p className={`text-2xl font-bold ${getScoreColor(result.score)}`}>
                           {result.score !== null ? `${result.score}%` : '-'}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground uppercase tracking-wider font-semibold mb-1">Integrity</p>
-                        <p className={`text-2xl font-bold ${getIntegrityColor(result.integrity)}`}>
-                          {result.integrity !== null ? `${result.integrity}%` : '-'}
                         </p>
                       </div>
                     </div>
@@ -183,40 +137,6 @@ export default function StudentResultsPage() {
                 </CardContent>
               </Card>
             ))}
-          </div>
-        )}
-
-        {/* Summary Stats */}
-        {results.length > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <Card className="p-4">
-              <p className="text-xs text-muted-foreground mb-1">Total Exams</p>
-              <p className="text-2xl font-bold text-foreground">{results.length}</p>
-            </Card>
-            <Card className="p-4">
-              <p className="text-xs text-muted-foreground mb-1">Avg Score</p>
-              <p className="text-2xl font-bold text-foreground">
-                {(
-                  results.filter((r) => r.score !== null).reduce((sum, r) => sum + (r.score || 0), 0) /
-                  results.filter((r) => r.score !== null).length
-                ).toFixed(1)}
-                %
-              </p>
-            </Card>
-            <Card className="p-4">
-              <p className="text-xs text-muted-foreground mb-1">Avg Integrity</p>
-              <p className="text-2xl font-bold text-foreground">
-                {(
-                  results.filter((r) => r.integrity !== null).reduce((sum, r) => sum + (r.integrity || 0), 0) /
-                  results.filter((r) => r.integrity !== null).length
-                ).toFixed(1)}
-                %
-              </p>
-            </Card>
-            <Card className="p-4">
-              <p className="text-xs text-muted-foreground mb-1">Violations</p>
-              <p className="text-2xl font-bold text-red-600">{results.filter((r) => r.violation_logs_id).length}</p>
-            </Card>
           </div>
         )}
       </main>

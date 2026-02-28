@@ -3,6 +3,7 @@ import api from '@/lib/api';
 
 interface Exam {
   id: string;
+  exam_code?: string;
   title: string;
   duration: number;
   proctor_config: { level?: string };
@@ -10,6 +11,7 @@ interface Exam {
 
 interface Batch {
   id: string;
+  batch_code?: string;
   name: string;
   members: string[];
 }
@@ -17,8 +19,11 @@ interface Batch {
 interface Assignment {
   id: string;
   exam_id: string;
+  exam_code?: string;
   batch_id?: string | null;
+  batch_code?: string | null;
   student_id?: string | null;
+  student_code?: string | null;
 }
 
 export default function AssignExamPage() {
@@ -85,7 +90,7 @@ export default function AssignExamPage() {
               >
                 <option value="">Select exam</option>
                 {exams.map((exam) => (
-                  <option key={exam.id} value={exam.id}>{exam.title}</option>
+                  <option key={exam.id} value={exam.id}>{exam.title} ({exam.exam_code || '-'})</option>
                 ))}
               </select>
             </div>
@@ -99,7 +104,7 @@ export default function AssignExamPage() {
               >
                 <option value="">Select batch</option>
                 {batches.map((batch) => (
-                  <option key={batch.id} value={batch.id}>{batch.name} ({batch.id})</option>
+                  <option key={batch.id} value={batch.id}>{batch.name} ({batch.batch_code || '-'})</option>
                 ))}
               </select>
             </div>
@@ -122,7 +127,7 @@ export default function AssignExamPage() {
               assignments.map((assignment) => (
                 <div key={assignment.id} className="border-b border-border/30 pb-2 last:border-0">
                   <p className="text-sm font-medium text-foreground">
-                    Exam {assignment.exam_id} · {assignment.batch_id ? `Batch ${assignment.batch_id}` : `Student ${assignment.student_id}`}
+                    Exam {assignment.exam_code || '-'} · {assignment.batch_id ? `Batch ${assignment.batch_code || '-'}` : `Student ${assignment.student_code || '-'}`}
                   </p>
                 </div>
               ))

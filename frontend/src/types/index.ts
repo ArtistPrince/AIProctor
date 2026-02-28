@@ -2,10 +2,17 @@ export type UserRole = 'super_admin' | 'institute_admin' | 'exam_admin' | 'proct
 
 export interface User {
   id: string;
+  code?: string;
   name: string;
   email: string;
   role: UserRole;
   institute_id?: string;
+  batch_id?: string;
+  batch_code?: string;
+  batch_year?: string;
+  course_name?: string;
+  roll_no?: string;
+  section?: string;
   avatar_url?: string;
 }
 
@@ -31,6 +38,7 @@ export interface Student {
 
 export interface Exam {
   id: string;
+  exam_code?: string;
   title: string;
   institute_id: string;
   faculty_id: string;
@@ -66,6 +74,7 @@ export interface Question {
 
 export interface Batch {
   id: string;
+  batch_code?: string;
   name: string;
   institute_id: string;
   course_code: string;
@@ -77,8 +86,11 @@ export interface Batch {
 
 export interface ExamSession {
   id: string;
+  session_code?: string;
   exam_id: string;
+  exam_code?: string;
   student_id: string;
+  student_code?: string;
   status: 'active' | 'submitted' | 'flagged' | 'terminated';
   started_at: string;
   submitted_at?: string;

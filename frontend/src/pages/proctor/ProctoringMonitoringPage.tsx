@@ -7,6 +7,7 @@ import { Eye, AlertTriangle } from 'lucide-react';
 
 interface Exam {
   id: string;
+  exam_code?: string;
   title: string;
   duration: number;
   department_id?: string;
@@ -105,7 +106,7 @@ export default function ProctoringDashboardPage() {
                   <div className="flex justify-between items-start">
                     <div>
                       <h3 className="text-lg font-semibold text-foreground">{exam.title}</h3>
-                      <p className="text-xs text-muted-foreground mt-1">{exam.duration} minutes • {exam.id}</p>
+                      <p className="text-xs text-muted-foreground mt-1">{exam.duration} minutes • {exam.exam_code || '-'}</p>
                     </div>
                     {stats.violations > 0 && <AlertTriangle className="h-5 w-5 text-red-600" />}
                   </div>

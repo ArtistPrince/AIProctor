@@ -7,6 +7,7 @@ import { MoreVertical, Camera, Radio, User } from 'lucide-react';
 
 interface Exam {
   id: string;
+  exam_code?: string;
   title: string;
 }
 
@@ -61,7 +62,7 @@ export default function ProctoringResultsPage() {
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-1">Proctoring</p>
         <h1 className="text-2xl font-bold text-foreground">Live Exam Grid</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          {exam?.title || 'Exam'} • {examId || '-'}
+          {exam?.title || 'Exam'} • {exam?.exam_code || '-'}
         </p>
       </div>
 
@@ -105,7 +106,7 @@ export default function ProctoringResultsPage() {
                   <User className="h-3 w-3" /> {student.name}
                 </span>
                 <span className="px-2 py-1 rounded bg-green-100 text-green-800 inline-flex items-center gap-1">
-                  <Radio className="h-3 w-3" /> LIVE • {examId}
+                  <Radio className="h-3 w-3" /> LIVE • {exam?.exam_code || '-'}
                 </span>
               </div>
             </Card>

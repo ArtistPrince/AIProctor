@@ -36,11 +36,16 @@ class UserOut(BaseModel):
 	id: str
 	institute_id: Optional[str] = None
 	batch_id: Optional[str] = None
+	batch_code: Optional[str] = None
+	batch_year: Optional[str] = None
+	course_name: Optional[str] = None
 	name: Optional[str] = None
 	email: str
 	role: str
 	profile_image: Optional[str] = None
 	code: Optional[str] = None
+	roll_no: Optional[str] = None
+	section: Optional[str] = None
 
 	class Config:
 		from_attributes = True
@@ -114,7 +119,7 @@ class DepartmentOut(BaseModel):
 
 
 class ExamCreate(BaseModel):
-	faculty_id: str
+	faculty_id: Optional[str] = None
 	subject_code: str
 	exam_type: str
 	exam_year: str
@@ -122,6 +127,7 @@ class ExamCreate(BaseModel):
 	duration_minutes: int = Field(alias="duration")
 	passing_marks: int
 	scheduled_time: Optional[datetime] = None
+	end_time: Optional[datetime] = None
 
 	class Config:
 		populate_by_name = True
@@ -139,6 +145,7 @@ class ExamOut(BaseModel):
 	duration_minutes: int
 	passing_marks: int
 	scheduled_time: Optional[datetime] = None
+	end_time: Optional[datetime] = None
 	created_at: Optional[datetime] = None
 	duration: int
 
@@ -199,8 +206,11 @@ class ExamAssignmentOut(BaseModel):
 	id: UUID | str
 	institute_id: Optional[str] = None
 	exam_id: str
+	exam_code: Optional[str] = None
 	batch_id: str
+	batch_code: Optional[str] = None
 	student_id: Optional[str] = None
+	student_code: Optional[str] = None
 	assigned_at: Optional[datetime] = None
 
 	class Config:
@@ -211,7 +221,9 @@ class ExamAssignmentWithExam(BaseModel):
 	id: UUID | str
 	exam_id: str
 	batch_id: Optional[str] = None
+	batch_code: Optional[str] = None
 	student_id: Optional[str] = None
+	student_code: Optional[str] = None
 	exam: ExamOut
 
 	class Config:
@@ -228,9 +240,12 @@ class ExamSessionCreate(BaseModel):
 
 class ExamSessionOut(BaseModel):
 	id: str
+	session_code: Optional[str] = None
 	institute_id: Optional[str] = None
 	student_id: str
+	student_code: Optional[str] = None
 	exam_id: str
+	exam_code: Optional[str] = None
 	status: str
 	score: Optional[int] = None
 	integrity: Optional[int] = None
@@ -246,6 +261,7 @@ class ExamSessionOut(BaseModel):
 
 class StudentInfo(BaseModel):
 	id: str
+	code: Optional[str] = None
 	email: str
 	profile_image: Optional[str] = None
 
@@ -255,9 +271,12 @@ class StudentInfo(BaseModel):
 
 class ExamSessionWithDetails(BaseModel):
 	id: str
+	session_code: Optional[str] = None
 	student_id: str
+	student_code: Optional[str] = None
 	student: StudentInfo
 	exam_id: str
+	exam_code: Optional[str] = None
 	status: str
 	score: Optional[int] = None
 	integrity: Optional[int] = None

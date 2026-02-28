@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 
 from .. import database, models, schemas
 from ..security import require_role
@@ -65,7 +66,10 @@ def list_batches(
 
     result: list[schemas.BatchOut] = []
     for batch in rows:
-        members = [str(student.id) for student in db.query(models.Student).filter(models.Student.batch_id == batch.id).all()]
+        members = [
+            student.student_code or str(student.id)
+            for student in db.query(models.Student).filter(models.Student.batch_id == batch.id).all()
+        ]
         result.append(
             schemas.BatchOut(
                 id=str(batch.id),
@@ -97,7 +101,11 @@ def add_members_to_batch(
         raise HTTPException(status_code=403, detail="Cannot update batch outside your institute")
 
     for student_id in member_ids:
-        student = db.query(models.Student).filter(models.Student.id == student_id).first()
+        student = (
+            db.query(models.Student)
+            .filter(or_(models.Student.id == student_id, models.Student.student_code == student_id))
+            .first()
+        )
         if not student:
             raise HTTPException(status_code=404, detail=f"Student {student_id} not found")
         if str(student.institute_id) != str(batch.institute_id):
@@ -107,7 +115,10 @@ def add_members_to_batch(
     db.commit()
     db.refresh(batch)
 
-    members = [str(student.id) for student in db.query(models.Student).filter(models.Student.batch_id == batch.id).all()]
+    members = [
+        student.student_code or str(student.id)
+        for student in db.query(models.Student).filter(models.Student.batch_id == batch.id).all()
+    ]
     return schemas.BatchOut(
         id=str(batch.id),
         institute_id=str(batch.institute_id),

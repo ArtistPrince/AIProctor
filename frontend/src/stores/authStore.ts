@@ -34,10 +34,17 @@ export const useAuthStore = create<AuthState>()(
           
           const user: User = {
             id: String(meRes.data.id),
-            name: meRes.data.email.split('@')[0],
+            code: meRes.data.code,
+            name: meRes.data.name || meRes.data.email.split('@')[0],
             email: meRes.data.email,
             role: meRes.data.role,
             institute_id: meRes.data.institute_id ? String(meRes.data.institute_id) : undefined,
+            batch_id: meRes.data.batch_id ? String(meRes.data.batch_id) : undefined,
+            batch_code: meRes.data.batch_code,
+            batch_year: meRes.data.batch_year,
+            course_name: meRes.data.course_name,
+            roll_no: meRes.data.roll_no,
+            section: meRes.data.section,
           };
           
           set({ user, token: access_token, isAuthenticated: true, isLoading: false });

@@ -14,7 +14,14 @@ def create_exam(
     db: Session = Depends(database.get_db),
     current_user=Depends(require_admin),
 ):
-    faculty = db.query(models.Faculty).filter(models.Faculty.id == exam.faculty_id).first()
+    target_faculty_id = exam.faculty_id
+    if current_user.role == "exam_admin":
+        target_faculty_id = current_user.id
+
+    if not target_faculty_id:
+        raise HTTPException(status_code=400, detail="faculty_id is required")
+
+    faculty = db.query(models.Faculty).filter(models.Faculty.id == target_faculty_id).first()
     if not faculty:
         raise HTTPException(status_code=404, detail="Faculty not found")
 
@@ -32,6 +39,7 @@ def create_exam(
         duration_minutes=exam.duration_minutes,
         passing_marks=exam.passing_marks,
         scheduled_time=exam.scheduled_time,
+        end_time=exam.end_time,
     )
     db.add(new_exam)
     db.commit()
@@ -48,6 +56,7 @@ def create_exam(
         duration_minutes=new_exam.duration_minutes,
         passing_marks=new_exam.passing_marks,
         scheduled_time=new_exam.scheduled_time,
+        end_time=new_exam.end_time,
         created_at=new_exam.created_at,
         duration=new_exam.duration_minutes,
     )
@@ -76,6 +85,7 @@ def list_exams(
             duration_minutes=exam.duration_minutes,
             passing_marks=exam.passing_marks,
             scheduled_time=exam.scheduled_time,
+            end_time=exam.end_time,
             created_at=exam.created_at,
             duration=exam.duration_minutes,
         )

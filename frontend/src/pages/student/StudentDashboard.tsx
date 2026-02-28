@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import api from '@/lib/api';
@@ -17,6 +17,7 @@ interface Assignment {
   student_id?: string | null;
   exam: {
     id: string;
+    exam_code?: string;
     title: string;
     duration: number;
     start_time?: string | null;
@@ -38,12 +39,51 @@ export default function StudentDashboard() {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [date, setDate] = useState<Date | undefined>(new Date());
+  const [isNotificationOpen, setIsNotificationOpen] = useState(false);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [seenNotificationIds, setSeenNotificationIds] = useState<string[]>([]);
+  const notificationRef = useRef<HTMLDivElement | null>(null);
+  const profileRef = useRef<HTMLDivElement | null>(null);
+
+  const notificationStorageKey = useMemo(() => `student-notification-seen-${user?.id || 'guest'}`, [user?.id]);
 
   useEffect(() => {
     fetchAssignments();
     const interval = window.setInterval(fetchAssignments, 30000);
     return () => window.clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    const raw = localStorage.getItem(notificationStorageKey);
+    if (!raw) {
+      setSeenNotificationIds([]);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        setSeenNotificationIds(parsed.filter((item) => typeof item === 'string'));
+      } else {
+        setSeenNotificationIds([]);
+      }
+    } catch {
+      setSeenNotificationIds([]);
+    }
+  }, [notificationStorageKey]);
+
+  useEffect(() => {
+    if (!isNotificationOpen && !isProfileOpen) return;
+    const onMouseDown = (event: MouseEvent) => {
+      if (notificationRef.current && !notificationRef.current.contains(event.target as Node)) {
+        setIsNotificationOpen(false);
+      }
+      if (profileRef.current && !profileRef.current.contains(event.target as Node)) {
+        setIsProfileOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    return () => document.removeEventListener('mousedown', onMouseDown);
+  }, [isNotificationOpen, isProfileOpen]);
 
   const firstName = useMemo(() => user?.name?.split(' ')[0] || 'Student', [user?.name]);
   const initials = useMemo(() => {
@@ -66,6 +106,47 @@ export default function StudentDashboard() {
     return sorted[0];
   }, [assignments]);
 
+  const notifications = useMemo(() => {
+    const sorted = [...assignments].sort((a, b) => {
+      const aTime = a.exam.start_time ? new Date(a.exam.start_time).getTime() : Number.MIN_SAFE_INTEGER;
+      const bTime = b.exam.start_time ? new Date(b.exam.start_time).getTime() : Number.MIN_SAFE_INTEGER;
+      return bTime - aTime;
+    });
+
+    return sorted.map((assignment) => ({
+      id: assignment.id,
+      title: assignment.exam.title,
+      examCode: assignment.exam.exam_code,
+      when: assignment.exam.start_time,
+    }));
+  }, [assignments]);
+
+  const unreadNotifications = useMemo(
+    () => notifications.filter((item) => !seenNotificationIds.includes(item.id)),
+    [notifications, seenNotificationIds]
+  );
+
+  const profileDetails = useMemo(() => {
+    const studentCode = user?.code || '';
+    const parts = studentCode.split('-');
+    const inferredCourse = parts.length >= 2 ? parts[1] : undefined;
+    const inferredBatchYear = parts.length >= 3 ? parts[2] : undefined;
+    const inferredSection = parts.length >= 4 ? parts[3] : undefined;
+    const inferredRoll = parts.length >= 5 ? parts[4] : undefined;
+    const inferredBatch = parts.length >= 4 ? `${parts[0]}-${parts[1]}-${parts[2]}-${parts[3]}` : undefined;
+
+    return {
+      rollNo: user?.roll_no || inferredRoll || '-',
+      section: user?.section || inferredSection || '-',
+      batchYear: user?.batch_year || inferredBatchYear || '-',
+      batchCode: user?.batch_code || inferredBatch || '-',
+      courseName: user?.course_name || inferredCourse || '-',
+      studentId: user?.code || user?.id || '-',
+    };
+  }, [user]);
+
+  const hasUnreadNotifications = unreadNotifications.length > 0;
+
   const fetchAssignments = async () => {
     try {
       const res = await api.get('/assignments/me');
@@ -75,6 +156,33 @@ export default function StudentDashboard() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const markNotificationsAsRead = () => {
+    const allIds = notifications.map((item) => item.id);
+    setSeenNotificationIds(allIds);
+    localStorage.setItem(notificationStorageKey, JSON.stringify(allIds));
+  };
+
+  const handleToggleNotifications = () => {
+    setIsNotificationOpen((prev) => {
+      const next = !prev;
+      if (next) {
+        markNotificationsAsRead();
+        setIsProfileOpen(false);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleProfile = () => {
+    setIsProfileOpen((prev) => {
+      const next = !prev;
+      if (next) {
+        setIsNotificationOpen(false);
+      }
+      return next;
+    });
   };
 
   return (
@@ -93,18 +201,87 @@ export default function StudentDashboard() {
               <Link to="/student/results" className="hover:text-primary transition-colors">Results</Link>
               <a href="#" className="hover:text-primary transition-colors">Support</a>
             </div>
-            <Button variant="ghost" size="icon" className="rounded-full relative hover:bg-secondary">
-              <Bell className="h-5 w-5" />
-              <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-primary border border-background" />
-            </Button>
+            <div className="relative" ref={notificationRef}>
+              <Button variant="ghost" size="icon" onClick={handleToggleNotifications} className="rounded-full relative hover:bg-secondary">
+                <Bell className="h-5 w-5" />
+                {hasUnreadNotifications && <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-primary border border-background" />}
+              </Button>
+              {isNotificationOpen && (
+                <div className="absolute right-0 mt-2 w-80 rounded-xl border border-border bg-card card-shadow p-3 z-50">
+                  <div className="flex items-center justify-between pb-2 border-b border-border/60">
+                    <p className="text-sm font-semibold text-foreground">Notifications</p>
+                    <span className="text-[11px] text-muted-foreground">{notifications.length}</span>
+                  </div>
+                  <div className="mt-2 max-h-72 overflow-y-auto space-y-2">
+                    {notifications.length === 0 ? (
+                      <p className="text-xs text-muted-foreground py-3">No new updates.</p>
+                    ) : (
+                      notifications.map((notification) => (
+                        <div key={notification.id} className="rounded-lg border border-border/70 bg-secondary/40 px-3 py-2">
+                          <p className="text-sm font-medium text-foreground">New exam assigned: {notification.title}</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {notification.examCode || '-'}
+                            {notification.when ? ` • ${new Date(notification.when).toLocaleString()}` : ''}
+                          </p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
             <div className="text-right hidden sm:block">
               <p className="text-sm font-medium text-foreground">{user?.name || user?.email || 'Student'}</p>
               <p className="text-xs text-muted-foreground">Student</p>
             </div>
-            <div className="h-9 w-9 rounded-full bg-gradient-to-tr from-primary to-accent p-[1px]">
-              <div className="h-full w-full rounded-full bg-background flex items-center justify-center">
-                <User className="h-5 w-5 text-primary" />
-              </div>
+            <div className="relative" ref={profileRef}>
+              <button
+                type="button"
+                onClick={handleToggleProfile}
+                className="h-9 w-9 rounded-full bg-gradient-to-tr from-primary to-accent p-[1px]"
+              >
+                <div className="h-full w-full rounded-full bg-background flex items-center justify-center">
+                  <User className="h-5 w-5 text-primary" />
+                </div>
+              </button>
+              {isProfileOpen && (
+                <div className="absolute right-0 mt-2 w-80 rounded-xl border border-border bg-card card-shadow p-4 z-50">
+                  <div className="flex flex-col items-center pb-3 border-b border-border/60">
+                    <div className="h-16 w-16 rounded-full bg-secondary border border-border flex items-center justify-center">
+                      <User className="h-8 w-8 text-primary" />
+                    </div>
+                    <p className="mt-2 text-sm font-semibold text-foreground">{user?.name || 'Student'}</p>
+                    <p className="text-xs text-muted-foreground">{user?.email || '-'}</p>
+                  </div>
+
+                  <div className="mt-3 space-y-2 text-sm">
+                    <div className="flex items-center justify-between rounded-lg bg-secondary/40 px-3 py-2">
+                      <span className="text-muted-foreground">Roll No.</span>
+                      <span className="font-medium text-foreground">{profileDetails.rollNo}</span>
+                    </div>
+                    <div className="flex items-center justify-between rounded-lg bg-secondary/40 px-3 py-2">
+                      <span className="text-muted-foreground">Section</span>
+                      <span className="font-medium text-foreground">{profileDetails.section}</span>
+                    </div>
+                    <div className="flex items-center justify-between rounded-lg bg-secondary/40 px-3 py-2">
+                      <span className="text-muted-foreground">Batch Year</span>
+                      <span className="font-medium text-foreground">{profileDetails.batchYear}</span>
+                    </div>
+                    <div className="flex items-center justify-between rounded-lg bg-secondary/40 px-3 py-2">
+                      <span className="text-muted-foreground">Batch</span>
+                      <span className="font-medium text-foreground">{profileDetails.batchCode}</span>
+                    </div>
+                    <div className="flex items-center justify-between rounded-lg bg-secondary/40 px-3 py-2">
+                      <span className="text-muted-foreground">Course</span>
+                      <span className="font-medium text-foreground">{profileDetails.courseName}</span>
+                    </div>
+                    <div className="flex items-center justify-between rounded-lg bg-secondary/40 px-3 py-2">
+                      <span className="text-muted-foreground">Student ID</span>
+                      <span className="font-medium text-foreground">{profileDetails.studentId}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
             <Button variant="ghost" size="icon" onClick={logout} className="text-muted-foreground hover:text-destructive hover:bg-secondary">
               <LogOut className="h-5 w-5" />
@@ -120,7 +297,7 @@ export default function StudentDashboard() {
             <p className="text-muted-foreground mt-1">Ready to ace your exams today?</p>
           </div>
           <span className="text-sm text-muted-foreground bg-card px-3 py-1 rounded-full border border-border flex items-center gap-2">
-            Student ID: <span className="font-mono text-primary">{user?.id || 'N/A'}</span>
+            Student ID: <span className="font-mono text-primary">{user?.code || user?.id || 'N/A'}</span>
           </span>
         </div>
 
@@ -136,7 +313,7 @@ export default function StudentDashboard() {
                     <CardTitle className="text-2xl mb-1 text-foreground">{latestAssignment?.exam.title || 'No exam assigned'}</CardTitle>
                     <CardDescription className="flex items-center gap-2 text-muted-foreground">
                       <span className="font-mono text-primary bg-secondary px-1.5 rounded border border-border">
-                        {latestAssignment?.exam.id || '---'}
+                        {latestAssignment?.exam.exam_code || '---'}
                       </span>
                     </CardDescription>
                   </div>
@@ -298,7 +475,7 @@ export default function StudentDashboard() {
                 </div>
                 <div>
                   <div className="text-sm font-medium text-foreground">{user?.name || user?.email || 'Student'}</div>
-                  <div className="text-xs text-muted-foreground">{user?.id || 'N/A'}</div>
+                  <div className="text-xs text-muted-foreground">{user?.code || user?.id || 'N/A'}</div>
                 </div>
                 <div className="ml-auto">
                   <Settings className="h-4 w-4 text-muted-foreground" />

@@ -4,6 +4,7 @@ import api from '@/lib/api';
 interface Exam {
   id: string;
   title: string;
+  exam_code?: string;
 }
 
 interface Question {
@@ -31,7 +32,7 @@ export default function QuestionBankPage() {
 
   const examTitleById = useMemo(() => {
     const map = new Map<string, string>();
-    exams.forEach((exam) => map.set(exam.id, exam.title));
+    exams.forEach((exam) => map.set(exam.id, `${exam.title}${exam.exam_code ? ` (${exam.exam_code})` : ''}`));
     return map;
   }, [exams]);
 
@@ -63,7 +64,7 @@ export default function QuestionBankPage() {
               <div key={question.id} className="border-b border-border/30 pb-2 last:border-0">
                 <p className="text-sm font-medium text-foreground">[{question.type}] {question.text}</p>
                 <p className="text-xs text-muted-foreground">
-                  Subject: {examTitleById.get(question.exam_id) || question.exam_id} · {question.marks} marks
+                  Subject: {examTitleById.get(question.exam_id) || 'Unknown Exam'} · {question.marks} marks
                 </p>
                 {question.type === 'MCQ' && question.data?.correct_answer !== undefined && (
                   <p className="text-xs text-muted-foreground">

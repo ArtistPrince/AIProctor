@@ -4,9 +4,11 @@ import { useEffect, useMemo, useState } from 'react';
 import api from '@/lib/api';
 
 interface ExamSession {
-  id: number;
-  user_id: number;
-  exam_id: number;
+  id: string;
+  session_code?: string;
+  user_id?: string;
+  exam_id: string;
+  exam_code?: string;
   status: string;
 }
 
@@ -60,14 +62,14 @@ export default function ProctorDashboard() {
                 className="rounded-lg border p-4 transition-all border-border bg-secondary/30 hover:border-primary/30"
               >
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-semibold text-foreground">Session #{session.id}</span>
+                  <span className="text-xs font-semibold text-foreground">Session {session.session_code || '-'}</span>
                   <span className="h-2 w-2 rounded-full bg-success animate-pulse" />
                 </div>
                 <div className="aspect-video rounded-md bg-muted border border-border flex items-center justify-center mb-3">
                   <Monitor className="h-7 w-7 text-muted-foreground/30" />
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] text-muted-foreground">Exam {session.exam_id}</span>
+                  <span className="text-[11px] text-muted-foreground">Exam {session.exam_code || '-'}</span>
                   <span className="text-[11px] font-semibold px-2 py-0.5 rounded badge-success">
                     Ongoing
                   </span>

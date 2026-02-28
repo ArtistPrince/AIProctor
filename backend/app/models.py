@@ -101,6 +101,7 @@ class Exam(Base):
     duration_minutes = Column(Integer, nullable=False)
     passing_marks = Column(Integer, nullable=False)
     scheduled_time = Column(DateTime(timezone=True), nullable=True)
+    end_time = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.current_timestamp())
 
     @property

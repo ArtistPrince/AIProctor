@@ -60,9 +60,12 @@ def create_session(
 
     return schemas.ExamSessionOut(
         id=str(session.id),
+        session_code=session.session_code,
         institute_id=str(session.institute_id),
         student_id=str(session.student_id),
+        student_code=student.student_code,
         exam_id=str(session.exam_id),
+        exam_code=exam.exam_code,
         status=session.session_status,
         score=session.final_score,
         integrity=payload.integrity,
@@ -84,23 +87,30 @@ def list_sessions(
     else:
         rows = db.query(models.ExamSession).filter(models.ExamSession.institute_id == current_user.institute_id).all()
 
-    return [
-        schemas.ExamSessionOut(
-            id=str(row.id),
-            institute_id=str(row.institute_id),
-            student_id=str(row.student_id),
-            exam_id=str(row.exam_id),
-            status=row.session_status,
-            score=row.final_score,
-            integrity=None,
-            started_at=row.started_at,
-            completed_at=row.completed_at,
-            violation_found=row.violation_found,
-            mongo_log_ref=row.mongo_log_ref,
-            s3_media_prefix=row.s3_media_prefix,
+    result: list[schemas.ExamSessionOut] = []
+    for row in rows:
+        student = db.query(models.Student).filter(models.Student.id == row.student_id).first()
+        exam = db.query(models.Exam).filter(models.Exam.id == row.exam_id).first()
+        result.append(
+            schemas.ExamSessionOut(
+                id=str(row.id),
+                session_code=row.session_code,
+                institute_id=str(row.institute_id),
+                student_id=str(row.student_id),
+                student_code=student.student_code if student else None,
+                exam_id=str(row.exam_id),
+                exam_code=exam.exam_code if exam else None,
+                status=row.session_status,
+                score=row.final_score,
+                integrity=None,
+                started_at=row.started_at,
+                completed_at=row.completed_at,
+                violation_found=row.violation_found,
+                mongo_log_ref=row.mongo_log_ref,
+                s3_media_prefix=row.s3_media_prefix,
+            )
         )
-        for row in rows
-    ]
+    return result
 
 
 @router.get("/sessions/me", response_model=list[schemas.ExamSessionOut])
@@ -115,23 +125,75 @@ def list_my_sessions(
     else:
         rows = db.query(models.ExamSession).filter(models.ExamSession.institute_id == current_user.institute_id).all()
 
-    return [
-        schemas.ExamSessionOut(
-            id=str(row.id),
-            institute_id=str(row.institute_id),
-            student_id=str(row.student_id),
-            exam_id=str(row.exam_id),
-            status=row.session_status,
-            score=row.final_score,
-            integrity=None,
-            started_at=row.started_at,
-            completed_at=row.completed_at,
-            violation_found=row.violation_found,
-            mongo_log_ref=row.mongo_log_ref,
-            s3_media_prefix=row.s3_media_prefix,
+    result: list[schemas.ExamSessionOut] = []
+    for row in rows:
+        student = db.query(models.Student).filter(models.Student.id == row.student_id).first()
+        exam = db.query(models.Exam).filter(models.Exam.id == row.exam_id).first()
+        result.append(
+            schemas.ExamSessionOut(
+                id=str(row.id),
+                session_code=row.session_code,
+                institute_id=str(row.institute_id),
+                student_id=str(row.student_id),
+                student_code=student.student_code if student else None,
+                exam_id=str(row.exam_id),
+                exam_code=exam.exam_code if exam else None,
+                status=row.session_status,
+                score=row.final_score,
+                integrity=None,
+                started_at=row.started_at,
+                completed_at=row.completed_at,
+                violation_found=row.violation_found,
+                mongo_log_ref=row.mongo_log_ref,
+                s3_media_prefix=row.s3_media_prefix,
+            )
         )
-        for row in rows
-    ]
+    return result
+
+
+@router.get("/sessions/me/details", response_model=list[dict])
+def list_my_session_details(
+    db: Session = Depends(database.get_db),
+    current_user=Depends(require_role(["student"])),
+):
+    student = db.query(models.Student).filter(models.Student.id == current_user.id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student profile not found")
+
+    rows = (
+        db.query(models.ExamSession)
+        .filter(models.ExamSession.student_id == current_user.id)
+        .order_by(models.ExamSession.completed_at.desc().nullslast(), models.ExamSession.started_at.desc().nullslast())
+        .all()
+    )
+
+    result = []
+    for row in rows:
+        exam = db.query(models.Exam).filter(models.Exam.id == row.exam_id).first()
+        if not exam:
+            continue
+
+        normalized_status = "submitted" if row.session_status == "completed" else row.session_status
+        result.append(
+            {
+                "id": str(row.id),
+                "session_code": row.session_code,
+                "student_id": str(row.student_id),
+                "student_code": student.student_code,
+                "student_name": student.name,
+                "student_email": student.email,
+                "exam_id": str(row.exam_id),
+                "exam_code": exam.exam_code,
+                "exam_title": exam.title,
+                "status": normalized_status,
+                "score": row.final_score,
+                "integrity": None,
+                "violation_logs_id": "YES" if row.violation_found else None,
+                "attempted_at": row.started_at,
+                "submitted_at": row.completed_at,
+            }
+        )
+    return result
 
 
 @router.get("/sessions/exam/{exam_id}", response_model=list[schemas.ExamSessionOut])
@@ -148,23 +210,29 @@ def list_exam_attempts(
         raise HTTPException(status_code=403, detail="Unauthorized to view this exam's attempts")
 
     rows = db.query(models.ExamSession).filter(models.ExamSession.exam_id == exam_id).all()
-    return [
-        schemas.ExamSessionOut(
-            id=str(row.id),
-            institute_id=str(row.institute_id),
-            student_id=str(row.student_id),
-            exam_id=str(row.exam_id),
-            status=row.session_status,
-            score=row.final_score,
-            integrity=None,
-            started_at=row.started_at,
-            completed_at=row.completed_at,
-            violation_found=row.violation_found,
-            mongo_log_ref=row.mongo_log_ref,
-            s3_media_prefix=row.s3_media_prefix,
+    result: list[schemas.ExamSessionOut] = []
+    for row in rows:
+        student = db.query(models.Student).filter(models.Student.id == row.student_id).first()
+        result.append(
+            schemas.ExamSessionOut(
+                id=str(row.id),
+                session_code=row.session_code,
+                institute_id=str(row.institute_id),
+                student_id=str(row.student_id),
+                student_code=student.student_code if student else None,
+                exam_id=str(row.exam_id),
+                exam_code=exam.exam_code,
+                status=row.session_status,
+                score=row.final_score,
+                integrity=None,
+                started_at=row.started_at,
+                completed_at=row.completed_at,
+                violation_found=row.violation_found,
+                mongo_log_ref=row.mongo_log_ref,
+                s3_media_prefix=row.s3_media_prefix,
+            )
         )
-        for row in rows
-    ]
+    return result
 
 
 @router.get("/sessions/exam/{exam_id}/details", response_model=list[dict])
@@ -189,10 +257,13 @@ def list_exam_attempts_with_details(
         result.append(
             {
                 "id": str(row.id),
+                "session_code": row.session_code,
                 "student_id": str(row.student_id),
+                "student_code": student.student_code,
                 "student_email": student.email,
                 "student_name": student.name,
                 "exam_id": str(row.exam_id),
+                "exam_code": exam.exam_code,
                 "status": row.session_status,
                 "score": row.final_score,
                 "integrity": None,
@@ -231,9 +302,12 @@ def mark_exam_missed(
     if existing:
         return schemas.ExamSessionOut(
             id=str(existing.id),
+            session_code=existing.session_code,
             institute_id=str(existing.institute_id),
             student_id=str(existing.student_id),
+            student_code=student.student_code,
             exam_id=str(existing.exam_id),
+            exam_code=exam.exam_code,
             status=existing.session_status,
             score=existing.final_score,
             integrity=None,
@@ -259,9 +333,12 @@ def mark_exam_missed(
     db.refresh(session)
     return schemas.ExamSessionOut(
         id=str(session.id),
+        session_code=session.session_code,
         institute_id=str(session.institute_id),
         student_id=str(session.student_id),
+        student_code=student.student_code,
         exam_id=str(session.exam_id),
+        exam_code=exam.exam_code,
         status=session.session_status,
         score=session.final_score,
         integrity=None,

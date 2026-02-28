@@ -3,6 +3,7 @@ import api from '@/lib/api';
 
 interface Batch {
   id: string;
+  batch_code?: string;
   name: string;
   course_code: string;
   batch_year: string;
@@ -133,7 +134,7 @@ export default function BatchesPage() {
               >
                 <option value="">Select batch</option>
                 {batches.map((batch) => (
-                  <option key={batch.id} value={batch.id}>{batch.id} · {batch.name}</option>
+                  <option key={batch.id} value={batch.id}>{batch.batch_code || '-'} · {batch.name}</option>
                 ))}
               </select>
             </div>
@@ -163,7 +164,7 @@ export default function BatchesPage() {
           ) : (
             batches.map((batch) => (
               <div key={batch.id} className="border-b border-border/30 pb-2 last:border-0">
-                <p className="text-sm font-medium text-foreground">{batch.id} · {batch.course_name} ({batch.course_code}-{batch.batch_year})</p>
+                <p className="text-sm font-medium text-foreground">{batch.batch_code || '-'} · {batch.course_name} ({batch.course_code}-{batch.batch_year})</p>
                 <p className="text-xs text-muted-foreground">Members: {batch.members.join(', ') || 'None'}</p>
               </div>
             ))

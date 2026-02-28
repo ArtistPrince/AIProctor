@@ -16,6 +16,7 @@ interface ExamAttempt {
 
 interface Exam {
   id: string;
+  exam_code?: string;
   title: string;
   duration: number;
 }
@@ -70,7 +71,7 @@ export default function ExamResultsPage() {
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-1">Exam Administration</p>
         <h1 className="text-2xl font-bold text-foreground">
           <span className="font-bold">{exam?.title || 'Exam Results'}</span>
-          {exam && <span className="text-muted-foreground font-mono text-sm ml-2">({examId?.slice(0, 8)})</span>}
+          {exam && <span className="text-muted-foreground font-mono text-sm ml-2">({exam.exam_code || '-'})</span>}
         </h1>
         <p className="text-sm text-muted-foreground mt-1">View student attempts, scores, and integrity metrics.</p>
       </div>

@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '@/lib/api';
+import { Calendar as CalendarIcon } from 'lucide-react';
+import { Calendar } from '@/components/ui/calendar';
+import { Card, CardContent, CardFooter } from '@/components/ui/card';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 interface Exam {
   id: string;
   title: string;
+  exam_code?: string;
   duration_minutes: number;
-}
-
-interface Faculty {
-  id: string;
-  name: string;
-  dept_code: string;
 }
 
 interface Question {
@@ -29,16 +30,16 @@ interface Question {
 export default function ExamSetupPage() {
   const [exams, setExams] = useState<Exam[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
-  const [faculties, setFaculties] = useState<Faculty[]>([]);
 
-  const [facultyId, setFacultyId] = useState('');
   const [subjectCode, setSubjectCode] = useState('');
   const [examType, setExamType] = useState('MID');
   const [examYear, setExamYear] = useState(new Date().getFullYear().toString().slice(-2));
   const [title, setTitle] = useState('');
   const [duration, setDuration] = useState(60);
   const [passingMarks, setPassingMarks] = useState(40);
-  const [scheduledTime, setScheduledTime] = useState('');
+  const [examDate, setExamDate] = useState<Date | undefined>(new Date());
+  const [startTime, setStartTime] = useState('10:30:00');
+  const [endTime, setEndTime] = useState('12:30:00');
 
   const [questionExamId, setQuestionExamId] = useState<string>('');
   const [questionType, setQuestionType] = useState('MCQ');
@@ -50,13 +51,12 @@ export default function ExamSetupPage() {
 
   useEffect(() => {
     fetchExams();
-    fetchFaculties();
     fetchQuestions();
   }, []);
 
   const examTitleById = useMemo(() => {
     const map = new Map<string, string>();
-    exams.forEach((exam) => map.set(exam.id, exam.title));
+    exams.forEach((exam) => map.set(exam.id, `${exam.title}${exam.exam_code ? ` (${exam.exam_code})` : ''}`));
     return map;
   }, [exams]);
 
@@ -65,33 +65,38 @@ export default function ExamSetupPage() {
     setExams(response.data);
   };
 
-  const fetchFaculties = async () => {
-    const response = await api.get('/faculties/');
-    setFaculties(response.data);
-  };
-
   const fetchQuestions = async () => {
     const response = await api.get('/questions/');
     setQuestions(response.data);
   };
 
+  const combineDateAndTime = (dateValue?: Date, timeValue?: string) => {
+    if (!dateValue || !timeValue) return null;
+    const [hours, minutes, seconds] = timeValue.split(':').map((value) => Number(value));
+    const combined = new Date(dateValue);
+    combined.setHours(hours || 0, minutes || 0, seconds || 0, 0);
+    return combined.toISOString();
+  };
+
   const handleCreateExam = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!facultyId) return;
+    const scheduledIso = combineDateAndTime(examDate, startTime);
+    const endIso = combineDateAndTime(examDate, endTime);
     await api.post('/exams/', {
-      faculty_id: facultyId,
       subject_code: subjectCode,
       exam_type: examType,
       exam_year: examYear,
       title,
       duration: Number(duration),
       passing_marks: Number(passingMarks),
-      scheduled_time: scheduledTime ? new Date(scheduledTime).toISOString() : null,
+      scheduled_time: scheduledIso,
+      end_time: endIso,
     });
     setTitle('');
     setSubjectCode('');
-    setScheduledTime('');
-    setFacultyId('');
+    setExamDate(new Date());
+    setStartTime('10:30:00');
+    setEndTime('12:30:00');
     fetchExams();
   };
 
@@ -111,7 +116,6 @@ export default function ExamSetupPage() {
         setQuestionError('Please select the correct answer by clicking A, B, C, or D.');
         return;
       }
-      // Map the selected index to the actual option text (for display purposes)
       const filledOptions = mcqOptions.filter((opt) => opt.trim().length > 0);
       const correctOptionText = filledOptions[mcqCorrectAnswerIndex];
       payloadData = { options, correct_answer: mcqCorrectAnswerIndex, correct_answer_text: correctOptionText };
@@ -135,6 +139,10 @@ export default function ExamSetupPage() {
     setMcqOptions((prev) => prev.map((opt, i) => (i === index ? value : opt)));
   };
 
+  const selectedScheduleText = examDate
+    ? `${examDate.toLocaleDateString()} ${startTime.slice(0, 5)} - ${endTime.slice(0, 5)}`
+    : 'Select date and time';
+
   return (
     <div className="space-y-8">
       <div>
@@ -147,22 +155,6 @@ export default function ExamSetupPage() {
         <div className="bg-card rounded-xl border border-border card-shadow p-6">
           <h2 className="text-lg font-semibold text-foreground mb-4">Create Exam</h2>
           <form onSubmit={handleCreateExam} className="space-y-4">
-            <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">Faculty</label>
-              <select
-                className="w-full h-10 px-3 rounded-lg bg-secondary border border-border text-sm"
-                value={facultyId}
-                onChange={(e) => setFacultyId(e.target.value)}
-                required
-              >
-                <option value="">Select faculty</option>
-                {faculties.map((faculty) => (
-                  <option key={faculty.id} value={faculty.id}>
-                    {faculty.name} ({faculty.dept_code})
-                  </option>
-                ))}
-              </select>
-            </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1">Subject Code</label>
@@ -212,14 +204,60 @@ export default function ExamSetupPage() {
                 required
               />
             </div>
-            <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">Scheduled Time</label>
-              <input
-                type="datetime-local"
-                className="w-full h-10 px-3 rounded-lg bg-secondary border border-border text-sm"
-                value={scheduledTime}
-                onChange={(e) => setScheduledTime(e.target.value)}
-              />
+            <div className="space-y-2">
+              <label className="block text-xs font-medium text-muted-foreground">Schedule</label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    className="w-full h-10 px-3 rounded-lg bg-secondary border border-border text-sm text-left flex items-center justify-between"
+                  >
+                    <span className="truncate">{selectedScheduleText}</span>
+                    <CalendarIcon className="h-4 w-4 text-muted-foreground" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0 bg-white text-black border-gray-200" align="start">
+                  <Card className="border-0 shadow-none py-4 bg-white text-black">
+                    <CardContent className="px-4">
+                      <Calendar
+                        mode="single"
+                        selected={examDate}
+                        onSelect={setExamDate}
+                        className="bg-transparent p-0"
+                      />
+                    </CardContent>
+                    <CardFooter className="flex gap-2 border-t px-4 !pt-4 *:[div]:w-full">
+                      <div>
+                        <Label htmlFor="time-from" className="sr-only">
+                          Start Time
+                        </Label>
+                        <Input
+                          id="time-from"
+                          type="time"
+                          step="1"
+                          value={startTime}
+                          onChange={(e) => setStartTime(e.target.value)}
+                          className="appearance-none [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
+                        />
+                      </div>
+                      <span>-</span>
+                      <div>
+                        <Label htmlFor="time-to" className="sr-only">
+                          End Time
+                        </Label>
+                        <Input
+                          id="time-to"
+                          type="time"
+                          step="1"
+                          value={endTime}
+                          onChange={(e) => setEndTime(e.target.value)}
+                          className="appearance-none [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
+                        />
+                      </div>
+                    </CardFooter>
+                  </Card>
+                </PopoverContent>
+              </Popover>
             </div>
             <button className="h-10 px-4 rounded-lg bg-primary text-primary-foreground text-sm font-semibold">
               Save Exam
@@ -354,7 +392,7 @@ export default function ExamSetupPage() {
                 <div key={question.id} className="border-b border-border/30 pb-2 last:border-0">
                   <p className="text-sm font-medium text-foreground">[{question.type}] {question.text}</p>
                   <p className="text-xs text-muted-foreground">
-                    Subject: {examTitleById.get(question.exam_id) || question.exam_id} · {question.marks} marks
+                    Subject: {examTitleById.get(question.exam_id) || 'Unknown Exam'} · {question.marks} marks
                   </p>
                   {question.type === 'MCQ' && question.data?.correct_answer !== undefined && (
                     <p className="text-xs text-muted-foreground">
