@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from .. import database, models, schemas
 from ..security import require_role
+from ..utils.partitions import ensure_tenant_partitions
 
 router = APIRouter()
 require_admin = require_role(["super_admin", "institute_admin", "exam_admin"])
@@ -28,6 +29,8 @@ def create_exam(
     institute_id = str(faculty.institute_id)
     if current_user.role != "super_admin" and current_user.institute_id != institute_id:
         raise HTTPException(status_code=403, detail="Cannot create exam outside your institute")
+
+    ensure_tenant_partitions(db, institute_id)
 
     new_exam = models.Exam(
         institute_id=faculty.institute_id,

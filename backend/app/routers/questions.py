@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from .. import database, models, schemas
 from ..security import require_role
+from ..utils.partitions import ensure_tenant_partitions
 
 router = APIRouter()
 require_admin = require_role(["super_admin", "institute_admin", "exam_admin"])
@@ -21,6 +22,8 @@ def create_question(
 
     if current_user.role != "super_admin" and str(exam.institute_id) != str(current_user.institute_id):
         raise HTTPException(status_code=403, detail="Cannot create question outside your institute")
+
+    ensure_tenant_partitions(db, exam.institute_id)
 
     options = question.data.get("options") if isinstance(question.data, dict) else None
     if not isinstance(options, list) or len(options) == 0:

@@ -5,9 +5,45 @@ from sqlalchemy.orm import Session
 
 from .. import database, models, schemas
 from ..security import require_role
+from ..utils.partitions import ensure_tenant_partitions
 
 router = APIRouter()
 require_admin = require_role(["super_admin", "institute_admin", "exam_admin", "proctor"])
+
+
+def _fetch_student_map(db: Session, student_ids: set) -> dict:
+    if not student_ids:
+        return {}
+    rows = (
+        db.query(models.Student.id, models.Student.student_code, models.Student.name, models.Student.email)
+        .filter(models.Student.id.in_(list(student_ids)))
+        .all()
+    )
+    return {
+        str(student_id): {
+            "student_code": student_code,
+            "name": name,
+            "email": email,
+        }
+        for student_id, student_code, name, email in rows
+    }
+
+
+def _fetch_exam_map(db: Session, exam_ids: set) -> dict:
+    if not exam_ids:
+        return {}
+    rows = (
+        db.query(models.Exam.id, models.Exam.exam_code, models.Exam.title)
+        .filter(models.Exam.id.in_(list(exam_ids)))
+        .all()
+    )
+    return {
+        str(exam_id): {
+            "exam_code": exam_code,
+            "title": title,
+        }
+        for exam_id, exam_code, title in rows
+    }
 
 
 def _map_status(status: str | None) -> str:
@@ -41,6 +77,8 @@ def create_session(
 
     if str(student.institute_id) != str(exam.institute_id):
         raise HTTPException(status_code=400, detail="Student and exam belong to different institutes")
+
+    ensure_tenant_partitions(db, exam.institute_id)
 
     status = _map_status(payload.status)
     now = datetime.now(timezone.utc)
@@ -87,19 +125,22 @@ def list_sessions(
     else:
         rows = db.query(models.ExamSession).filter(models.ExamSession.institute_id == current_user.institute_id).all()
 
+    student_map = _fetch_student_map(db, {str(row.student_id) for row in rows})
+    exam_map = _fetch_exam_map(db, {str(row.exam_id) for row in rows})
+
     result: list[schemas.ExamSessionOut] = []
     for row in rows:
-        student = db.query(models.Student).filter(models.Student.id == row.student_id).first()
-        exam = db.query(models.Exam).filter(models.Exam.id == row.exam_id).first()
+        student = student_map.get(str(row.student_id))
+        exam = exam_map.get(str(row.exam_id))
         result.append(
             schemas.ExamSessionOut(
                 id=str(row.id),
                 session_code=row.session_code,
                 institute_id=str(row.institute_id),
                 student_id=str(row.student_id),
-                student_code=student.student_code if student else None,
+                student_code=student["student_code"] if student else None,
                 exam_id=str(row.exam_id),
-                exam_code=exam.exam_code if exam else None,
+                exam_code=exam["exam_code"] if exam else None,
                 status=row.session_status,
                 score=row.final_score,
                 integrity=None,
@@ -125,19 +166,22 @@ def list_my_sessions(
     else:
         rows = db.query(models.ExamSession).filter(models.ExamSession.institute_id == current_user.institute_id).all()
 
+    student_map = _fetch_student_map(db, {str(row.student_id) for row in rows})
+    exam_map = _fetch_exam_map(db, {str(row.exam_id) for row in rows})
+
     result: list[schemas.ExamSessionOut] = []
     for row in rows:
-        student = db.query(models.Student).filter(models.Student.id == row.student_id).first()
-        exam = db.query(models.Exam).filter(models.Exam.id == row.exam_id).first()
+        student = student_map.get(str(row.student_id))
+        exam = exam_map.get(str(row.exam_id))
         result.append(
             schemas.ExamSessionOut(
                 id=str(row.id),
                 session_code=row.session_code,
                 institute_id=str(row.institute_id),
                 student_id=str(row.student_id),
-                student_code=student.student_code if student else None,
+                student_code=student["student_code"] if student else None,
                 exam_id=str(row.exam_id),
-                exam_code=exam.exam_code if exam else None,
+                exam_code=exam["exam_code"] if exam else None,
                 status=row.session_status,
                 score=row.final_score,
                 integrity=None,
@@ -167,9 +211,11 @@ def list_my_session_details(
         .all()
     )
 
+    exam_map = _fetch_exam_map(db, {str(row.exam_id) for row in rows})
+
     result = []
     for row in rows:
-        exam = db.query(models.Exam).filter(models.Exam.id == row.exam_id).first()
+        exam = exam_map.get(str(row.exam_id))
         if not exam:
             continue
 
@@ -183,8 +229,8 @@ def list_my_session_details(
                 "student_name": student.name,
                 "student_email": student.email,
                 "exam_id": str(row.exam_id),
-                "exam_code": exam.exam_code,
-                "exam_title": exam.title,
+                "exam_code": exam["exam_code"],
+                "exam_title": exam["title"],
                 "status": normalized_status,
                 "score": row.final_score,
                 "integrity": None,
@@ -210,16 +256,17 @@ def list_exam_attempts(
         raise HTTPException(status_code=403, detail="Unauthorized to view this exam's attempts")
 
     rows = db.query(models.ExamSession).filter(models.ExamSession.exam_id == exam_id).all()
+    student_map = _fetch_student_map(db, {str(row.student_id) for row in rows})
     result: list[schemas.ExamSessionOut] = []
     for row in rows:
-        student = db.query(models.Student).filter(models.Student.id == row.student_id).first()
+        student = student_map.get(str(row.student_id))
         result.append(
             schemas.ExamSessionOut(
                 id=str(row.id),
                 session_code=row.session_code,
                 institute_id=str(row.institute_id),
                 student_id=str(row.student_id),
-                student_code=student.student_code if student else None,
+                student_code=student["student_code"] if student else None,
                 exam_id=str(row.exam_id),
                 exam_code=exam.exam_code,
                 status=row.session_status,
@@ -249,9 +296,10 @@ def list_exam_attempts_with_details(
         raise HTTPException(status_code=403, detail="Unauthorized to view this exam's attempts")
 
     rows = db.query(models.ExamSession).filter(models.ExamSession.exam_id == exam_id).all()
+    student_map = _fetch_student_map(db, {str(row.student_id) for row in rows})
     result = []
     for row in rows:
-        student = db.query(models.Student).filter(models.Student.id == row.student_id).first()
+        student = student_map.get(str(row.student_id))
         if not student:
             continue
         result.append(
@@ -259,9 +307,9 @@ def list_exam_attempts_with_details(
                 "id": str(row.id),
                 "session_code": row.session_code,
                 "student_id": str(row.student_id),
-                "student_code": student.student_code,
-                "student_email": student.email,
-                "student_name": student.name,
+                "student_code": student["student_code"],
+                "student_email": student["email"],
+                "student_name": student["name"],
                 "exam_id": str(row.exam_id),
                 "exam_code": exam.exam_code,
                 "status": row.session_status,

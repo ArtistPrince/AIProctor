@@ -4,6 +4,7 @@ from sqlalchemy import or_
 
 from .. import database, models, schemas
 from ..security import require_role
+from ..utils.partitions import ensure_tenant_partitions
 
 router = APIRouter()
 require_batch_manage = require_role(["super_admin", "institute_admin"])
@@ -21,6 +22,8 @@ def create_batch(
         institute_id = batch.institute_id
     if not institute_id:
         raise HTTPException(status_code=400, detail="institute_id is required")
+
+    ensure_tenant_partitions(db, institute_id)
 
     existing = (
         db.query(models.Batch)
@@ -64,12 +67,23 @@ def list_batches(
     else:
         rows = db.query(models.Batch).filter(models.Batch.institute_id == current_user.institute_id).all()
 
+    batch_ids = [row.id for row in rows]
+    members_by_batch: dict[str, list[str]] = {}
+    if batch_ids:
+        student_rows = (
+            db.query(models.Student.batch_id, models.Student.student_code, models.Student.id)
+            .filter(models.Student.batch_id.in_(batch_ids))
+            .all()
+        )
+        for batch_id, student_code, student_id in student_rows:
+            key = str(batch_id)
+            if key not in members_by_batch:
+                members_by_batch[key] = []
+            members_by_batch[key].append(student_code or str(student_id))
+
     result: list[schemas.BatchOut] = []
     for batch in rows:
-        members = [
-            student.student_code or str(student.id)
-            for student in db.query(models.Student).filter(models.Student.batch_id == batch.id).all()
-        ]
+        members = members_by_batch.get(str(batch.id), [])
         result.append(
             schemas.BatchOut(
                 id=str(batch.id),

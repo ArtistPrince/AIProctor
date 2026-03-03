@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from .. import database, models, schemas
 from ..security import create_access_token, get_current_user, get_password_hash, require_role, verify_password
+from ..utils.partitions import ensure_tenant_partitions
 
 router = APIRouter()
 require_admin = require_role(["super_admin", "institute_admin", "exam_admin"])
@@ -128,6 +129,7 @@ def create_user(
         existing = db.query(models.InstituteAdmin).filter(models.InstituteAdmin.email == user.email).first()
         if existing:
             raise HTTPException(status_code=409, detail="Email already registered")
+        ensure_tenant_partitions(db, institute_id)
         entity = models.InstituteAdmin(
             institute_id=institute_id,
             emp_id=user.emp_id,
@@ -153,6 +155,7 @@ def create_user(
         existing = db.query(models.Faculty).filter(models.Faculty.email == user.email).first()
         if existing:
             raise HTTPException(status_code=409, detail="Email already registered")
+        ensure_tenant_partitions(db, institute_id)
         entity = models.Faculty(
             institute_id=institute_id,
             dept_code=user.dept_code.upper(),
@@ -186,6 +189,7 @@ def create_user(
         if existing:
             raise HTTPException(status_code=409, detail="Email already registered")
 
+        ensure_tenant_partitions(db, institute_id)
         entity = models.Student(
             institute_id=institute_id,
             batch_id=user.batch_id,

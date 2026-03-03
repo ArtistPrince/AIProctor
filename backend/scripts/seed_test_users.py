@@ -26,20 +26,21 @@ PARTITIONED_PARENT_TABLES = [
 ]
 
 
-def ensure_partitions(db, institute_id) -> None:
+def ensure_partitions(db, institute_id, institute_code: str, partition_schema: str) -> None:
     institute_id_str = str(institute_id)
-    suffix = institute_id_str.replace("-", "_")
+    suffix = institute_code.lower()
+    db.execute(text(f"CREATE SCHEMA IF NOT EXISTS {partition_schema}"))
     for parent in PARTITIONED_PARENT_TABLES:
-        partition_name = f"{parent}_p_{suffix}"
+        partition_name = f"{parent}_{suffix}"
         sql = f"""
-        CREATE TABLE IF NOT EXISTS {partition_name}
-        PARTITION OF {parent}
+        CREATE TABLE IF NOT EXISTS {partition_schema}.{partition_name}
+        PARTITION OF public.{parent}
         FOR VALUES IN ('{institute_id_str}')
         """
         db.execute(text(sql))
 
 
-def seed_test_credentials(institute_name: str, institute_code: str, password: str) -> int:
+def seed_test_credentials(institute_name: str, institute_code: str, password: str, partition_schema: str) -> int:
     db = SessionLocal()
     try:
         password_hash = get_password_hash(password)
@@ -54,7 +55,7 @@ def seed_test_credentials(institute_name: str, institute_code: str, password: st
         else:
             print(f"Institute already exists: {institute.name} ({institute.institute_code})")
 
-        ensure_partitions(db, institute.id)
+        ensure_partitions(db, institute.id, institute.institute_code, partition_schema)
         db.commit()
 
         super_admin_email = "superadmin@pheme.testing"
@@ -172,12 +173,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--institute", default="Pheme Testing")
     parser.add_argument("--institute-code", default="PHEME")
     parser.add_argument("--password", default="Testing123!")
+    parser.add_argument("--partition-schema", default="tenant_partitions")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    exit_code = seed_test_credentials(args.institute, args.institute_code, args.password)
+    exit_code = seed_test_credentials(args.institute, args.institute_code, args.password, args.partition_schema)
     sys.exit(exit_code)
 
 

@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from .. import database, models, schemas
 from ..security import get_password_hash, require_role
+from ..utils.partitions import ensure_tenant_partitions
 
 router = APIRouter()
 require_admin = require_role(["super_admin", "institute_admin"])
@@ -22,6 +23,7 @@ def create_faculty(
     if existing:
         raise HTTPException(status_code=409, detail="Faculty with this email already exists")
 
+    ensure_tenant_partitions(db, payload.institute_id)
     faculty = models.Faculty(
         institute_id=payload.institute_id,
         dept_code=payload.dept_code.upper(),
@@ -33,7 +35,15 @@ def create_faculty(
     db.add(faculty)
     db.commit()
     db.refresh(faculty)
-    return faculty
+    return schemas.FacultyOut(
+        id=str(faculty.id),
+        institute_id=str(faculty.institute_id),
+        name=faculty.name,
+        dept_code=faculty.dept_code,
+        emp_id=faculty.emp_id,
+        faculty_code=faculty.faculty_code,
+        email=faculty.email,
+    )
 
 
 @router.get("/faculties/", response_model=list[schemas.FacultyOut])
@@ -42,7 +52,21 @@ def list_faculties(
     current_user=Depends(require_read),
 ):
     if current_user.role == "super_admin":
-        return db.query(models.Faculty).all()
-    if current_user.institute_id is None:
-        return []
-    return db.query(models.Faculty).filter(models.Faculty.institute_id == current_user.institute_id).all()
+        rows = db.query(models.Faculty).all()
+    elif current_user.institute_id is None:
+        rows = []
+    else:
+        rows = db.query(models.Faculty).filter(models.Faculty.institute_id == current_user.institute_id).all()
+
+    return [
+        schemas.FacultyOut(
+            id=str(row.id),
+            institute_id=str(row.institute_id),
+            name=row.name,
+            dept_code=row.dept_code,
+            emp_id=row.emp_id,
+            faculty_code=row.faculty_code,
+            email=row.email,
+        )
+        for row in rows
+    ]
