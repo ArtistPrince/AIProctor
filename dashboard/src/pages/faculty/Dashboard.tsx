@@ -8,9 +8,11 @@ import { useNavigate } from 'react-router-dom';
 import { Clock, BookOpen } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { listBatches, listExams, listSessions } from '@/lib/backendApi';
+import { useAuth } from '@/contexts/AuthContext';
 
 const FacultyDashboard: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { data: exams = [] } = useQuery({ queryKey: ['dashboard', 'faculty', 'exams'], queryFn: listExams });
   const { data: batches = [] } = useQuery({ queryKey: ['dashboard', 'faculty', 'batches'], queryFn: listBatches });
   const { data: sessions = [] } = useQuery({ queryKey: ['dashboard', 'faculty', 'sessions'], queryFn: listSessions });
@@ -24,7 +26,7 @@ const FacultyDashboard: React.FC = () => {
 
   return (
     <DashboardLayout>
-      <PageHeader title="Faculty Dashboard" subtitle="Prof. James Wilson" />
+      <PageHeader title="Faculty Dashboard" subtitle={user?.name || user?.email || ''} />
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {kpis.map((kpi, i) => <KPICard key={i} data={kpi} />)}
       </div>

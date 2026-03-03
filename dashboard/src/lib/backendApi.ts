@@ -131,6 +131,12 @@ function mapUser(payload: BackendUser): User {
     email: payload.email,
     role: normalizeBackendRole(payload.role),
     instituteId: payload.institute_id || undefined,
+    batchId: payload.batch_id || undefined,
+    batchCode: payload.batch_code || undefined,
+    batchYear: payload.batch_year || undefined,
+    courseName: payload.course_name || undefined,
+    code: payload.code || undefined,
+    rollNo: payload.roll_no || undefined,
   };
 }
 

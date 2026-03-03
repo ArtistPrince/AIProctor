@@ -6,7 +6,7 @@ import PageHeader from '@/components/dashboard/PageHeader';
 import { KPIData } from '@/types';
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useQuery } from '@tanstack/react-query';
-import { listBatches, listExams, listFaculties, listSessions, listUsers } from '@/lib/backendApi';
+import { listBatches, listExams, listFaculties, listInstitutes, listSessions, listUsers } from '@/lib/backendApi';
 
 const InstituteAdminDashboard: React.FC = () => {
   const { data: users = [] } = useQuery({ queryKey: ['institute-dashboard', 'users'], queryFn: listUsers });
@@ -14,6 +14,7 @@ const InstituteAdminDashboard: React.FC = () => {
   const { data: batches = [] } = useQuery({ queryKey: ['institute-dashboard', 'batches'], queryFn: listBatches });
   const { data: exams = [] } = useQuery({ queryKey: ['institute-dashboard', 'exams'], queryFn: listExams });
   const { data: sessions = [] } = useQuery({ queryKey: ['institute-dashboard', 'sessions'], queryFn: listSessions });
+  const { data: institutes = [] } = useQuery({ queryKey: ['institute-dashboard', 'institutes'], queryFn: listInstitutes });
 
   const now = new Date();
   const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -61,9 +62,11 @@ const InstituteAdminDashboard: React.FC = () => {
     { title: 'Avg Risk Score', value: `${riskPercent}%`, change: 'Live data', changeType: riskPercent < 20 ? 'positive' : 'negative', icon: 'AlertTriangle', colorIndex: 6 },
   ];
 
+  const instituteSubtitle = institutes[0]?.name || 'Institute Overview';
+
   return (
     <DashboardLayout>
-      <PageHeader title="Institute Dashboard" subtitle="MIT Institute of Technology" />
+      <PageHeader title="Institute Dashboard" subtitle={instituteSubtitle} />
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
         {kpis.map((kpi, i) => <KPICard key={i} data={kpi} />)}
       </div>

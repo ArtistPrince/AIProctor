@@ -8,9 +8,11 @@ import { useNavigate } from 'react-router-dom';
 import { Clock, BookOpen, Timer } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { listMyAssignments, listMySessions } from '@/lib/backendApi';
+import { useAuth } from '@/contexts/AuthContext';
 
 const StudentDashboard: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { data: exams = [] } = useQuery({ queryKey: ['dashboard', 'student', 'assignments'], queryFn: listMyAssignments });
   const { data: sessions = [] } = useQuery({ queryKey: ['dashboard', 'student', 'sessions'], queryFn: listMySessions });
 
@@ -29,9 +31,11 @@ const StudentDashboard: React.FC = () => {
     { title: 'Live Now', value: liveCount, change: liveCount > 0 ? 'Available now' : 'No active exam', changeType: 'neutral', icon: 'Activity', colorIndex: 5 },
   ];
 
+  const studentSubtitle = [user?.name, user?.batchCode].filter(Boolean).join(' — ') || user?.email || '';
+
   return (
     <DashboardLayout>
-      <PageHeader title="Student Dashboard" subtitle="Emily Davis — CS-2024-A" />
+      <PageHeader title="Student Dashboard" subtitle={studentSubtitle} />
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {kpis.map((kpi, i) => <KPICard key={i} data={kpi} />)}
       </div>

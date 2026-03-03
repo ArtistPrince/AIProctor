@@ -8,6 +8,13 @@ export interface User {
   avatar?: string;
   instituteId?: string;
   instituteName?: string;
+  batchId?: string;
+  batchCode?: string;
+  batchYear?: string;
+  courseName?: string;
+  code?: string;
+  rollNo?: string;
+  section?: string;
 }
 
 export interface Institute {
