@@ -7,19 +7,68 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { useNavigate } from 'react-router-dom';
 import { Clock, Flag, ChevronLeft, ChevronRight, Send } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { listMyAssignments, listMySessions, listQuestionsForExam } from '@/lib/backendApi';
+import { createOrUpdateSession, listMyAssignments, listMySessions, listQuestionsForExam } from '@/lib/backendApi';
 import { useToast } from '@/hooks/use-toast';
 import { Question } from '@/types';
+import { useAuth } from '@/contexts/AuthContext';
 
 const ExamAttemptPage: React.FC = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { user } = useAuth();
   const [currentQ, setCurrentQ] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [flagged, setFlagged] = useState<Set<string>>(new Set());
   const [timeLeft, setTimeLeft] = useState(2700); // 45 min
   const [showTabWarning, setShowTabWarning] = useState(false);
+  const [showFullscreenWarning, setShowFullscreenWarning] = useState(false);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [fullscreenActive, setFullscreenActive] = useState(false);
+  const cameraVideoRef = React.useRef<HTMLVideoElement | null>(null);
+  const cameraStreamRef = React.useRef<MediaStream | null>(null);
+
+  const attachStreamToPreview = async () => {
+    const preview = cameraVideoRef.current;
+    const stream = cameraStreamRef.current;
+    if (!preview || !stream) return;
+
+    if (preview.srcObject !== stream) {
+      preview.srcObject = stream;
+    }
+
+    try {
+      await preview.play();
+      setCameraReady(stream.getVideoTracks().some((track) => track.readyState === 'live'));
+      setCameraError(null);
+    } catch {
+      setCameraError('Camera stream available but preview playback was blocked by browser.');
+    }
+  };
+
+  const startCamera = async () => {
+    try {
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+        cameraStreamRef.current = null;
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'user',
+          width: { ideal: 640 },
+          height: { ideal: 360 },
+        },
+        audio: false,
+      });
+      cameraStreamRef.current = stream;
+      await attachStreamToPreview();
+    } catch {
+      setCameraReady(false);
+      setCameraError('Camera access denied or unavailable.');
+    }
+  };
 
   const { data: assignments = [] } = useQuery({
     queryKey: ['exam-attempt', 'assignments'],
@@ -65,6 +114,15 @@ const ExamAttemptPage: React.FC = () => {
   }, [selectedExam?.id]);
 
   useEffect(() => {
+    const passedSession = sessionStorage.getItem('student_system_check_passed') === '1';
+    const passedLocal = localStorage.getItem('student_system_check_passed') === '1';
+    if (!passedSession && !passedLocal) {
+      toast({ title: 'System check required', description: 'Complete system checks before starting exam.', variant: 'destructive' });
+      navigate('/student/system-check');
+    }
+  }, [navigate, toast]);
+
+  useEffect(() => {
     const timer = setInterval(() => {
       setTimeLeft(t => {
         if (t <= 1) { handleSubmit(); return 0; }
@@ -82,11 +140,108 @@ const ExamAttemptPage: React.FC = () => {
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, []);
 
+  useEffect(() => {
+    void startCamera();
+
+    return () => {
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+        cameraStreamRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    // If stream started before video mounted (loading state), attach once preview exists.
+    void attachStreamToPreview();
+  }, [questions.length, currentQ]);
+
+  useEffect(() => {
+    let reentryInterval: number | undefined;
+
+    const requestFullscreen = async () => {
+      const element = document.documentElement as HTMLElement & {
+        webkitRequestFullscreen?: () => Promise<void>;
+      };
+      try {
+        if (document.fullscreenElement) {
+          setFullscreenActive(true);
+          return;
+        }
+        if (element.requestFullscreen) {
+          await element.requestFullscreen();
+        } else if (element.webkitRequestFullscreen) {
+          await element.webkitRequestFullscreen();
+        }
+        setFullscreenActive(true);
+      } catch {
+        setFullscreenActive(false);
+      }
+    };
+
+    const handleFullscreenChange = () => {
+      const active = !!document.fullscreenElement;
+      setFullscreenActive(active);
+      if (!active) {
+        setShowFullscreenWarning(true);
+      }
+    };
+
+    void requestFullscreen();
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    reentryInterval = window.setInterval(() => {
+      if (!document.fullscreenElement) {
+        void requestFullscreen();
+      }
+    }, 1200);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      if (reentryInterval) {
+        clearInterval(reentryInterval);
+      }
+    };
+  }, []);
+
   const handleSubmit = () => {
+    const totalMarks = questions.reduce((sum, item) => sum + (item.marks || 1), 0);
+    const score = questions.reduce((sum, item) => {
+      const answer = answers[item.id];
+      const isCorrect = !!answer && String(answer).trim() === String(item.correctAnswer || '').trim();
+      return sum + (isCorrect ? (item.marks || 1) : 0);
+    }, 0);
+
+    if (user?.id && selectedExam?.id) {
+      void createOrUpdateSession({
+        studentId: user.id,
+        examId: selectedExam.id,
+        status: 'submitted',
+        score: totalMarks > 0 ? Math.round((score / totalMarks) * 100) : 0,
+        integrity: 100,
+      }).catch(() => {
+        // Best-effort submission tracking; navigation continues.
+      });
+    }
+
+    sessionStorage.removeItem('student_system_check_passed');
+    localStorage.removeItem('student_system_check_passed');
     navigate('/student/exam-submitted');
   };
 
+  useEffect(() => {
+    if (!user?.id || !selectedExam?.id) return;
+    void createOrUpdateSession({
+      studentId: user.id,
+      examId: selectedExam.id,
+      status: 'in_progress',
+      integrity: 100,
+    }).catch(() => {
+      // Best-effort session start tracking.
+    });
+  }, [user?.id, selectedExam?.id]);
+
   const q = questions[currentQ];
+  const qOptions = Array.isArray(q?.options) ? q.options : [];
   const progress = questions.length ? (Object.keys(answers).length / questions.length) * 100 : 0;
   const minutes = Math.floor(timeLeft / 60);
   const seconds = timeLeft % 60;
@@ -103,12 +258,25 @@ const ExamAttemptPage: React.FC = () => {
     );
   }
 
+  if (questions.length === 0) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-6">
+        <div className="text-center">
+          <h2 className="text-lg font-semibold mb-2">No Questions Available</h2>
+          <p className="text-sm text-muted-foreground mb-4">This exam does not have any questions yet or failed to load.</p>
+          <Button onClick={() => navigate('/student/exams')}>Back to Exams</Button>
+        </div>
+      </div>
+    );
+  }
+
   if (!q) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-6">
         <div className="text-center">
-          <h2 className="text-lg font-semibold mb-2">Loading Questions</h2>
-          <p className="text-sm text-muted-foreground">Fetching exam questions from database...</p>
+          <h2 className="text-lg font-semibold mb-2">Question Load Error</h2>
+          <p className="text-sm text-muted-foreground mb-4">Unable to render current question. Try reopening the exam.</p>
+          <Button onClick={() => navigate('/student/exams')}>Back to Exams</Button>
         </div>
       </div>
     );
@@ -128,6 +296,8 @@ const ExamAttemptPage: React.FC = () => {
           </div>
           <Progress value={progress} className="w-32 h-2" />
           <span className="text-xs text-topbar-muted">{Object.keys(answers).length}/{questions.length}</span>
+          <span className={`text-xs ${fullscreenActive ? 'text-success' : 'text-warning'}`}>{fullscreenActive ? 'Fullscreen On' : 'Fullscreen Off'}</span>
+          <span className={`text-xs ${cameraReady ? 'text-success' : 'text-destructive'}`}>{cameraReady ? 'Camera Live' : 'Camera Off'}</span>
         </div>
       </div>
 
@@ -151,7 +321,8 @@ const ExamAttemptPage: React.FC = () => {
         </div>
 
         {/* Question area */}
-        <div className="flex-1 p-8 max-w-3xl">
+        <div className="flex-1 p-8 pr-80">
+          <div className="max-w-3xl">
           <div className="flex items-center justify-between mb-6">
             <span className="text-sm text-muted-foreground">Question {currentQ + 1} of {questions.length}</span>
             <div className="flex items-center gap-2">
@@ -171,7 +342,7 @@ const ExamAttemptPage: React.FC = () => {
           {q.type === 'mcq' ? (
             <RadioGroup value={answers[q.id] || ''} onValueChange={(val) => setAnswers({ ...answers, [q.id]: val })}>
               <div className="space-y-3">
-                {q.options.map((opt, i) => (
+                {qOptions.map((opt, i) => (
                   <label key={i} className={`flex items-center gap-3 p-4 rounded-lg border cursor-pointer transition-colors ${
                     answers[q.id] === opt ? 'border-accent bg-accent/5' : 'border-border hover:bg-muted/50'
                   }`}>
@@ -179,6 +350,9 @@ const ExamAttemptPage: React.FC = () => {
                     <span className="text-sm">{opt}</span>
                   </label>
                 ))}
+                {qOptions.length === 0 && (
+                  <p className="text-sm text-muted-foreground">No options available for this MCQ question.</p>
+                )}
               </div>
             </RadioGroup>
           ) : (
@@ -204,8 +378,26 @@ const ExamAttemptPage: React.FC = () => {
               </Button>
             )}
           </div>
+          </div>
         </div>
       </div>
+
+      <aside className="fixed right-0 top-[56px] h-[calc(100vh-56px)] w-72 bg-card border-l p-4 z-40">
+        <p className="text-sm font-semibold mb-2">Live Proctor Feed</p>
+        <video
+          ref={cameraVideoRef}
+          autoPlay
+          muted
+          playsInline
+          className="w-full h-44 rounded-md bg-muted object-cover border"
+        />
+        <p className="text-xs text-muted-foreground mt-2">
+          {cameraError || 'Keep your face visible in frame throughout the exam.'}
+        </p>
+        <Button variant="outline" size="sm" className="mt-3 w-full" onClick={() => void startCamera()}>
+          Retry Camera Feed
+        </Button>
+      </aside>
 
       <AlertDialog open={showTabWarning} onOpenChange={setShowTabWarning}>
         <AlertDialogContent>
@@ -229,6 +421,15 @@ const ExamAttemptPage: React.FC = () => {
             <AlertDialogCancel>Continue Exam</AlertDialogCancel>
             <AlertDialogAction onClick={handleSubmit}>Submit</AlertDialogAction>
           </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showFullscreenWarning} onOpenChange={setShowFullscreenWarning}>
+        <AlertDialogContent>
+          <AlertDialogHeader><AlertDialogTitle>Fullscreen Required</AlertDialogTitle>
+            <AlertDialogDescription>Leaving fullscreen is treated as a violation. Fullscreen will be re-enabled automatically.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter><AlertDialogAction>Continue Exam</AlertDialogAction></AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </div>

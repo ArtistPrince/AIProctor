@@ -20,6 +20,79 @@ class InstituteCreate(BaseModel):
 	contact_email: Optional[str] = None
 
 
+class InstituteUpdate(BaseModel):
+	name: Optional[str] = None
+	address: Optional[str] = None
+	contact_email: Optional[str] = None
+
+
+class InstituteAdminPasswordReset(BaseModel):
+	new_password: str
+	admin_email: Optional[str] = None
+
+
+class InstituteAdminImportRow(BaseModel):
+	name: str
+	email: str
+	password: str
+	emp_id: Optional[str] = None
+
+
+class InstituteAdminImportRequest(BaseModel):
+	admins: List[InstituteAdminImportRow]
+
+
+class InstituteAdminImportResponse(BaseModel):
+	created: int
+
+
+class FacultyImportRow(BaseModel):
+	name: str
+	email: str
+	dept_code: str
+	emp_id: Optional[str] = None
+
+
+class FacultyImportRequest(BaseModel):
+	faculties: List[FacultyImportRow]
+
+
+class FacultyImportResponse(BaseModel):
+	created: int
+
+
+class BatchImportRow(BaseModel):
+	course_name: str
+	course_code: str
+	batch_year: str
+
+
+class BatchImportRequest(BaseModel):
+	batches: List[BatchImportRow]
+
+
+class BatchImportResponse(BaseModel):
+	created: int
+
+
+class StudentImportRow(BaseModel):
+	name: str
+	email: str
+	batch_code: Optional[str] = None
+	batch_id: Optional[str] = None
+	section: str
+	roll_no: str
+	password: Optional[str] = None
+
+
+class StudentImportRequest(BaseModel):
+	students: List[StudentImportRow]
+
+
+class StudentImportResponse(BaseModel):
+	created: int
+
+
 class InstituteOut(BaseModel):
 	id: str
 	institute_code: str
@@ -87,12 +160,26 @@ class UserCreate(BaseModel):
 	roll_no: Optional[str] = None
 
 
+class StudentUpdate(BaseModel):
+	name: Optional[str] = None
+	email: Optional[str] = None
+	batch_id: Optional[str] = None
+	section: Optional[str] = None
+	roll_no: Optional[str] = None
+
+
 class FacultyCreate(BaseModel):
 	institute_id: str
 	name: str
 	dept_code: str
 	emp_id: str
 	email: str
+
+
+class FacultyUpdate(BaseModel):
+	name: Optional[str] = None
+	dept_code: Optional[str] = None
+	email: Optional[str] = None
 
 
 class FacultyOut(BaseModel):
@@ -126,6 +213,17 @@ class ExamCreate(BaseModel):
 	title: str
 	duration_minutes: int = Field(alias="duration")
 	passing_marks: int
+	scheduled_time: Optional[datetime] = None
+	end_time: Optional[datetime] = None
+
+	class Config:
+		populate_by_name = True
+
+
+class ExamUpdate(BaseModel):
+	title: Optional[str] = None
+	duration_minutes: Optional[int] = Field(default=None, alias="duration")
+	passing_marks: Optional[int] = None
 	scheduled_time: Optional[datetime] = None
 	end_time: Optional[datetime] = None
 
@@ -236,6 +334,10 @@ class ExamSessionCreate(BaseModel):
 	score: Optional[int] = None
 	integrity: Optional[int] = None
 	status: Optional[str] = "completed"
+
+
+class ExamSessionReleaseUpdate(BaseModel):
+	released: bool
 
 
 class ExamSessionOut(BaseModel):

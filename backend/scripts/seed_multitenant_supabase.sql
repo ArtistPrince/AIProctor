@@ -22,6 +22,8 @@ DECLARE
     sch TEXT;
     inst TEXT;
     base TEXT;
+    inst_id UUID;
+    uuid_suffix TEXT;
 BEGIN
     -- Drop known seed partition tables from possible schemas
     FOR sch IN SELECT unnest(ARRAY['public', 'tenant_partition', 'tenant_partitions'])
@@ -40,6 +42,31 @@ BEGIN
             ])
             LOOP
                 EXECUTE format('DROP TABLE IF EXISTS %I.%I CASCADE', sch, base || '_' || inst);
+            END LOOP;
+        END LOOP;
+    END LOOP;
+
+    -- Drop canonical UUID-suffixed partition tables for existing target institutes
+    FOR sch IN SELECT unnest(ARRAY['public', 'tenant_partition', 'tenant_partitions'])
+    LOOP
+        FOR inst_id IN
+            SELECT id
+            FROM public.institutes
+            WHERE institute_code IN ('NOVA01', 'PINE02', 'AURM03', 'SUSP04', 'RIVR05')
+        LOOP
+            uuid_suffix := replace(lower(inst_id::text), '-', '_');
+            FOR base IN SELECT unnest(ARRAY[
+                'exam_sessions',
+                'exam_assignments',
+                'ques_ans',
+                'students',
+                'exams',
+                'faculties',
+                'batches',
+                'institute_admins'
+            ])
+            LOOP
+                EXECUTE format('DROP TABLE IF EXISTS %I.%I CASCADE', sch, base || '_' || uuid_suffix);
             END LOOP;
         END LOOP;
     END LOOP;
@@ -75,21 +102,23 @@ VALUES
 DO $$
 DECLARE
     inst RECORD;
+    suffix TEXT;
 BEGIN
     FOR inst IN
-        SELECT id, LOWER(institute_code) AS code
+        SELECT id
         FROM public.institutes
         WHERE institute_code IN ('NOVA01', 'PINE02', 'AURM03', 'SUSP04', 'RIVR05')
         ORDER BY institute_code
     LOOP
-        EXECUTE format('CREATE TABLE IF NOT EXISTS tenant_partitions.%I PARTITION OF public.institute_admins FOR VALUES IN (%L)', 'institute_admins_' || inst.code, inst.id);
-        EXECUTE format('CREATE TABLE IF NOT EXISTS tenant_partitions.%I PARTITION OF public.batches FOR VALUES IN (%L)', 'batches_' || inst.code, inst.id);
-        EXECUTE format('CREATE TABLE IF NOT EXISTS tenant_partitions.%I PARTITION OF public.faculties FOR VALUES IN (%L)', 'faculties_' || inst.code, inst.id);
-        EXECUTE format('CREATE TABLE IF NOT EXISTS tenant_partitions.%I PARTITION OF public.students FOR VALUES IN (%L)', 'students_' || inst.code, inst.id);
-        EXECUTE format('CREATE TABLE IF NOT EXISTS tenant_partitions.%I PARTITION OF public.exams FOR VALUES IN (%L)', 'exams_' || inst.code, inst.id);
-        EXECUTE format('CREATE TABLE IF NOT EXISTS tenant_partitions.%I PARTITION OF public.ques_ans FOR VALUES IN (%L)', 'ques_ans_' || inst.code, inst.id);
-        EXECUTE format('CREATE TABLE IF NOT EXISTS tenant_partitions.%I PARTITION OF public.exam_assignments FOR VALUES IN (%L)', 'exam_assignments_' || inst.code, inst.id);
-        EXECUTE format('CREATE TABLE IF NOT EXISTS tenant_partitions.%I PARTITION OF public.exam_sessions FOR VALUES IN (%L)', 'exam_sessions_' || inst.code, inst.id);
+        suffix := replace(lower(inst.id::text), '-', '_');
+        EXECUTE format('CREATE TABLE IF NOT EXISTS tenant_partitions.%I PARTITION OF public.institute_admins FOR VALUES IN (%L)', 'institute_admins_' || suffix, inst.id);
+        EXECUTE format('CREATE TABLE IF NOT EXISTS tenant_partitions.%I PARTITION OF public.batches FOR VALUES IN (%L)', 'batches_' || suffix, inst.id);
+        EXECUTE format('CREATE TABLE IF NOT EXISTS tenant_partitions.%I PARTITION OF public.faculties FOR VALUES IN (%L)', 'faculties_' || suffix, inst.id);
+        EXECUTE format('CREATE TABLE IF NOT EXISTS tenant_partitions.%I PARTITION OF public.students FOR VALUES IN (%L)', 'students_' || suffix, inst.id);
+        EXECUTE format('CREATE TABLE IF NOT EXISTS tenant_partitions.%I PARTITION OF public.exams FOR VALUES IN (%L)', 'exams_' || suffix, inst.id);
+        EXECUTE format('CREATE TABLE IF NOT EXISTS tenant_partitions.%I PARTITION OF public.ques_ans FOR VALUES IN (%L)', 'ques_ans_' || suffix, inst.id);
+        EXECUTE format('CREATE TABLE IF NOT EXISTS tenant_partitions.%I PARTITION OF public.exam_assignments FOR VALUES IN (%L)', 'exam_assignments_' || suffix, inst.id);
+        EXECUTE format('CREATE TABLE IF NOT EXISTS tenant_partitions.%I PARTITION OF public.exam_sessions FOR VALUES IN (%L)', 'exam_sessions_' || suffix, inst.id);
     END LOOP;
 END $$;
 

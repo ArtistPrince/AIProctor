@@ -8,6 +8,7 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import LoginPage from "./pages/auth/LoginPage";
 import SuperAdminDashboard from "./pages/super-admin/Dashboard";
 import InstitutesPage from "./pages/super-admin/Institutes";
+import InstituteDetailsPage from "@/pages/super-admin/InstituteDetails";
 import AnalyticsPage from "./pages/super-admin/Analytics";
 import InstituteAdminDashboard from "./pages/institute-admin/Dashboard";
 import FacultiesPage from "./pages/institute-admin/Faculties";
@@ -48,6 +49,8 @@ const AppRoutes = () => {
     return (
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/institute-login" element={<Navigate to="/login" replace />} />
+        <Route path="/dev-login" element={<Navigate to="/login" replace />} />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     );
@@ -56,9 +59,12 @@ const AppRoutes = () => {
   return (
     <Routes>
       <Route path="/login" element={<Navigate to="/" replace />} />
+      <Route path="/institute-login" element={<Navigate to="/" replace />} />
+      <Route path="/dev-login" element={<Navigate to="/" replace />} />
       {/* Super Admin */}
       <Route path="/super-admin" element={<SuperAdminDashboard />} />
       <Route path="/super-admin/institutes" element={<InstitutesPage />} />
+      <Route path="/super-admin/institutes/:instituteId" element={<InstituteDetailsPage />} />
       <Route path="/super-admin/analytics" element={<AnalyticsPage />} />
       <Route path="/super-admin/settings" element={<SettingsPage basePath="/super-admin" />} />
       {/* Institute Admin */}

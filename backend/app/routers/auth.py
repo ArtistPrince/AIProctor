@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .. import database, models, schemas
@@ -25,27 +26,53 @@ def _resolve_admin_by_email(db: Session, email: str):
     return None, None
 
 
+def _resolve_portal_user(db: Session, email: str, portal: str):
+    normalized_portal = portal.strip().lower()
+
+    if normalized_portal == "student":
+        student = db.query(models.Student).filter(models.Student.email == email).first()
+        return student, "student"
+
+    if normalized_portal == "institute":
+        institute_admin = db.query(models.InstituteAdmin).filter(models.InstituteAdmin.email == email).first()
+        if institute_admin:
+            return institute_admin, "institute_admin"
+
+        faculty = db.query(models.Faculty).filter(models.Faculty.email == email).first()
+        if faculty:
+            return faculty, "exam_admin"
+
+        return None, None
+
+    if normalized_portal == "dev":
+        super_admin = db.query(models.SuperAdmin).filter(models.SuperAdmin.email == email).first()
+        return super_admin, "super_admin"
+
+    return None, None
+
+
 @router.post("/login", response_model=schemas.Token)
 async def login(
     email: str = Form(...),
     password: str = Form(...),
-    role: str = Form(...),
+    portal: str | None = Form(None),
+    role: str | None = Form(None),
     file: UploadFile | None = File(None),
     db: Session = Depends(database.get_db),
 ):
     del file
 
-    if role not in ("admin", "student"):
-        raise HTTPException(status_code=400, detail="Role must be 'admin' or 'student'")
+    # Backward compatibility: old clients send role=admin|student.
+    effective_portal = (portal or role or "").strip().lower()
+    if effective_portal == "admin":
+        effective_portal = "institute"
+    if effective_portal not in ("student", "institute", "dev"):
+        raise HTTPException(status_code=400, detail="Portal must be one of: student, institute, dev")
 
-    if role == "admin":
-        user, resolved_role = _resolve_admin_by_email(db, email)
-    else:
-        user = db.query(models.Student).filter(models.Student.email == email).first()
-        resolved_role = "student"
+    user, resolved_role = _resolve_portal_user(db, email, effective_portal)
 
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail=f"User not found for {effective_portal} portal")
 
     if not verify_password(password, user.password_hash):
         raise HTTPException(status_code=401, detail="Incorrect password")
@@ -138,7 +165,14 @@ def create_user(
             password_hash=get_password_hash(user.password),
         )
         db.add(entity)
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            message = str(getattr(exc, "orig", exc)).lower()
+            if "admin_code" in message or "duplicate key" in message or "unique" in message:
+                raise HTTPException(status_code=409, detail="Institute admin already exists")
+            raise HTTPException(status_code=400, detail="Invalid institute admin data")
         db.refresh(entity)
         return schemas.UserOut(
             id=str(entity.id),
@@ -165,7 +199,14 @@ def create_user(
             password_hash=get_password_hash(user.password),
         )
         db.add(entity)
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            message = str(getattr(exc, "orig", exc)).lower()
+            if "faculty_code" in message or "duplicate key" in message or "unique" in message:
+                raise HTTPException(status_code=409, detail="Faculty already exists")
+            raise HTTPException(status_code=400, detail="Invalid faculty data")
         db.refresh(entity)
         return schemas.UserOut(
             id=str(entity.id),
@@ -200,7 +241,14 @@ def create_user(
             password_hash=get_password_hash(user.password),
         )
         db.add(entity)
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            message = str(getattr(exc, "orig", exc)).lower()
+            if "student_code" in message or "duplicate key" in message or "unique" in message:
+                raise HTTPException(status_code=409, detail="Student already exists with same roll/section in batch")
+            raise HTTPException(status_code=400, detail="Invalid student data")
         db.refresh(entity)
         return schemas.UserOut(
             id=str(entity.id),

@@ -52,7 +52,9 @@ def _map_status(status: str | None) -> str:
     value = status.lower()
     if value in {"ongoing", "active", "not_started", "started"}:
         return "in_progress"
-    if value in {"submitted", "completed"}:
+    if value in {"submitted"}:
+        return "submitted"
+    if value in {"completed"}:
         return "completed"
     if value in {"disqualified", "terminated", "flagged"}:
         return "terminated"
@@ -82,17 +84,35 @@ def create_session(
 
     status = _map_status(payload.status)
     now = datetime.now(timezone.utc)
-    session = models.ExamSession(
-        institute_id=exam.institute_id,
-        student_id=student.id,
-        exam_id=exam.id,
-        session_status=status,
-        started_at=now if status in ("in_progress", "completed", "terminated") else None,
-        completed_at=now if status in ("completed", "terminated", "missed") else None,
-        final_score=payload.score,
-        violation_found=status == "terminated",
-    )
-    db.add(session)
+    session = db.query(models.ExamSession).filter(
+        models.ExamSession.institute_id == exam.institute_id,
+        models.ExamSession.student_id == student.id,
+        models.ExamSession.exam_id == exam.id,
+    ).first()
+
+    if not session:
+        session = models.ExamSession(
+            institute_id=exam.institute_id,
+            student_id=student.id,
+            exam_id=exam.id,
+            session_status=status,
+            started_at=now if status in ("in_progress", "submitted", "completed", "terminated") else None,
+            completed_at=now if status in ("submitted", "completed", "terminated", "missed") else None,
+            final_score=payload.score,
+            violation_found=status == "terminated",
+        )
+        db.add(session)
+    else:
+        session.session_status = status
+        if status in ("in_progress", "submitted", "completed", "terminated") and not session.started_at:
+            session.started_at = now
+        if status in ("submitted", "completed", "terminated", "missed"):
+            session.completed_at = now
+        if payload.score is not None:
+            session.final_score = payload.score
+        if status == "terminated":
+            session.violation_found = True
+
     db.commit()
     db.refresh(session)
 
@@ -219,7 +239,6 @@ def list_my_session_details(
         if not exam:
             continue
 
-        normalized_status = "submitted" if row.session_status == "completed" else row.session_status
         result.append(
             {
                 "id": str(row.id),
@@ -231,7 +250,7 @@ def list_my_session_details(
                 "exam_id": str(row.exam_id),
                 "exam_code": exam["exam_code"],
                 "exam_title": exam["title"],
-                "status": normalized_status,
+                "status": row.session_status,
                 "score": row.final_score,
                 "integrity": None,
                 "violation_logs_id": "YES" if row.violation_found else None,
@@ -240,6 +259,46 @@ def list_my_session_details(
             }
         )
     return result
+
+
+@router.put("/sessions/{session_id}/release", response_model=schemas.ExamSessionOut)
+def update_result_release(
+    session_id: str,
+    payload: schemas.ExamSessionReleaseUpdate,
+    db: Session = Depends(database.get_db),
+    current_user=Depends(require_role(["super_admin", "institute_admin", "exam_admin", "proctor"])),
+):
+    row = db.query(models.ExamSession).filter(models.ExamSession.id == session_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if current_user.role != "super_admin" and str(current_user.institute_id) != str(row.institute_id):
+        raise HTTPException(status_code=403, detail="Cannot update session outside your institute")
+
+    row.session_status = "completed" if payload.released else "submitted"
+    db.commit()
+    db.refresh(row)
+
+    student = _fetch_student_map(db, {str(row.student_id)}).get(str(row.student_id))
+    exam = _fetch_exam_map(db, {str(row.exam_id)}).get(str(row.exam_id))
+
+    return schemas.ExamSessionOut(
+        id=str(row.id),
+        session_code=row.session_code,
+        institute_id=str(row.institute_id),
+        student_id=str(row.student_id),
+        student_code=student["student_code"] if student else None,
+        exam_id=str(row.exam_id),
+        exam_code=exam["exam_code"] if exam else None,
+        status=row.session_status,
+        score=row.final_score,
+        integrity=None,
+        started_at=row.started_at,
+        completed_at=row.completed_at,
+        violation_found=row.violation_found,
+        mongo_log_ref=row.mongo_log_ref,
+        s3_media_prefix=row.s3_media_prefix,
+    )
 
 
 @router.get("/sessions/exam/{exam_id}", response_model=list[schemas.ExamSessionOut])

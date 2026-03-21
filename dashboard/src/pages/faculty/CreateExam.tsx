@@ -17,7 +17,16 @@ const steps = ['Basic Details', 'Questions', 'Assign Batches', 'Assign Proctors'
 
 const CreateExamPage: React.FC = () => {
   const [step, setStep] = useState(0);
-  const [exam, setExam] = useState({ title: '', description: '', duration: 60, totalMarks: 100, mode: 'online' as string });
+  const [exam, setExam] = useState({
+    title: '',
+    description: '',
+    subjectCode: '',
+    examType: 'ONLINE',
+    examYear: `${new Date().getFullYear()}`,
+    duration: 60,
+    totalMarks: 100,
+    mode: 'online' as string,
+  });
   const [questions, setQuestions] = useState<Question[]>([]);
   const [qForm, setQForm] = useState({ type: 'mcq' as 'mcq' | 'short_answer', text: '', options: ['', '', '', ''], correctAnswer: '', marks: 2 });
   const [selectedBatches, setSelectedBatches] = useState<string[]>([]);
@@ -44,17 +53,62 @@ const CreateExamPage: React.FC = () => {
   const removeQuestion = (id: string) => setQuestions(questions.filter(q => q.id !== id));
 
   const handlePublish = async () => {
+    if (!exam.title.trim()) {
+      toast({ title: 'Validation Error', description: 'Exam title is required.', variant: 'destructive' });
+      return;
+    }
+    if (!exam.subjectCode.trim()) {
+      toast({ title: 'Validation Error', description: 'Subject code is required.', variant: 'destructive' });
+      return;
+    }
+    if (exam.duration <= 0 || exam.totalMarks <= 0) {
+      toast({ title: 'Validation Error', description: 'Duration and total marks must be greater than 0.', variant: 'destructive' });
+      return;
+    }
+    if (!questions.length) {
+      toast({ title: 'Validation Error', description: 'Add at least one question before publishing.', variant: 'destructive' });
+      return;
+    }
+    if (!selectedBatches.length) {
+      toast({ title: 'Validation Error', description: 'Assign at least one batch before publishing.', variant: 'destructive' });
+      return;
+    }
+    if (schedule.startDate && schedule.endDate && new Date(schedule.endDate) <= new Date(schedule.startDate)) {
+      toast({ title: 'Validation Error', description: 'End time must be after start time.', variant: 'destructive' });
+      return;
+    }
+
     try {
-      const createdExam = await createExam({
+      const normalizedSubjectCode = exam.subjectCode.trim().replace(/\s+/g, '').toUpperCase();
+      const payload = {
         title: exam.title,
-        subjectCode: exam.title.slice(0, 8).replace(/\s+/g, '').toUpperCase() || 'SUBJ',
-        examType: exam.mode === 'hybrid' ? 'HYBRID' : 'ONLINE',
-        examYear: `${new Date().getFullYear()}`,
+        subjectCode: normalizedSubjectCode,
+        examType: exam.examType,
+        examYear: exam.examYear,
         duration: exam.duration,
         passingMarks: Math.max(1, Math.floor(exam.totalMarks * 0.4)),
         scheduledTime: schedule.startDate ? new Date(schedule.startDate).toISOString() : undefined,
         endTime: schedule.endDate ? new Date(schedule.endDate).toISOString() : undefined,
-      });
+      };
+
+      let createdExam;
+      try {
+        createdExam = await createExam(payload);
+      } catch (error) {
+        const message = (error as Error).message || '';
+        if (!message.toLowerCase().includes('similar generated code')) {
+          throw error;
+        }
+        const suffix = Date.now().toString().slice(-4);
+        createdExam = await createExam({
+          ...payload,
+          subjectCode: `${normalizedSubjectCode}${suffix}`.slice(0, 50),
+        });
+        toast({
+          title: 'Code conflict resolved',
+          description: 'A unique exam code was generated automatically for publish.',
+        });
+      }
 
       await Promise.all(
         questions.map((question) =>
@@ -102,12 +156,20 @@ const CreateExamPage: React.FC = () => {
             <Input placeholder="Exam Title *" value={exam.title} onChange={e => setExam({ ...exam, title: e.target.value })} />
             <Textarea placeholder="Description" value={exam.description} onChange={e => setExam({ ...exam, description: e.target.value })} />
             <div className="grid grid-cols-2 gap-4">
+              <Input placeholder="Subject Code *" value={exam.subjectCode} onChange={e => setExam({ ...exam, subjectCode: e.target.value.toUpperCase() })} />
+              <Input placeholder="Exam Year" value={exam.examYear} onChange={e => setExam({ ...exam, examYear: e.target.value })} />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
               <Input type="number" placeholder="Duration (min)" value={exam.duration} onChange={e => setExam({ ...exam, duration: Number(e.target.value) })} />
               <Input type="number" placeholder="Total Marks" value={exam.totalMarks} onChange={e => setExam({ ...exam, totalMarks: Number(e.target.value) })} />
             </div>
-            <Select value={exam.mode} onValueChange={(v) => setExam({ ...exam, mode: v as 'online' | 'hybrid' })}>
+            <Select value={exam.examType} onValueChange={(v) => setExam({ ...exam, examType: v })}>
               <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent><SelectItem value="online">Online</SelectItem><SelectItem value="hybrid">Hybrid</SelectItem></SelectContent>
+              <SelectContent>
+                <SelectItem value="ONLINE">Online</SelectItem>
+                <SelectItem value="HYBRID">Hybrid</SelectItem>
+                <SelectItem value="OFFLINE">Offline</SelectItem>
+              </SelectContent>
             </Select>
           </div>
         )}
@@ -199,7 +261,9 @@ const CreateExamPage: React.FC = () => {
               <div><span className="text-muted-foreground">Title:</span> {exam.title || 'Not set'}</div>
               <div><span className="text-muted-foreground">Duration:</span> {exam.duration} min</div>
               <div><span className="text-muted-foreground">Total Marks:</span> {exam.totalMarks}</div>
-              <div><span className="text-muted-foreground">Mode:</span> {exam.mode}</div>
+              <div><span className="text-muted-foreground">Subject Code:</span> {exam.subjectCode || 'Not set'}</div>
+              <div><span className="text-muted-foreground">Exam Type:</span> {exam.examType}</div>
+              <div><span className="text-muted-foreground">Exam Year:</span> {exam.examYear}</div>
               <div><span className="text-muted-foreground">Questions:</span> {questions.length}</div>
               <div><span className="text-muted-foreground">Batches:</span> {selectedBatches.length}</div>
               <div><span className="text-muted-foreground">Start:</span> {schedule.startDate || 'Not set'}</div>

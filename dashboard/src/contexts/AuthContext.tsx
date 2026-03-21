@@ -16,7 +16,7 @@ const getStoredUser = (): User | null => {
 
 interface AuthContextType {
   user: User | null;
-  login: (email: string, password: string) => Promise<User>;
+  login: (email: string, password: string, portal: 'student' | 'institute' | 'dev') => Promise<User>;
   logout: () => void;
   isAuthenticated: boolean;
 }
@@ -41,17 +41,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     hydrateUser();
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
-    let token;
-    try {
-      token = await loginRequest(email, password, 'admin');
-    } catch (error) {
-      const message = (error as Error).message.toLowerCase();
-      if (!message.includes('user not found') && !message.includes('(404)')) {
-        throw error;
-      }
-      token = await loginRequest(email, password, 'student');
-    }
+  const login = useCallback(async (email: string, password: string, portal: 'student' | 'institute' | 'dev') => {
+    const token = await loginRequest(email, password, portal);
     setAccessToken(token.access_token);
     const me = await getMe();
     setUser(me);

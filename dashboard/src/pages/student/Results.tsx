@@ -31,7 +31,7 @@ const StudentResultsPage: React.FC = () => {
       {released.length > 0 && (
         <div className="space-y-4 mb-6">
           {released.map(r => (
-            <div key={r.examId} className="bg-card rounded-lg p-6 shadow-card">
+            <div key={r.sessionId} className="bg-card rounded-lg p-6 shadow-card">
               <div className="flex items-start justify-between">
                 <div>
                   <h3 className="font-semibold text-lg">{r.examTitle}</h3>
@@ -64,7 +64,7 @@ const StudentResultsPage: React.FC = () => {
         <div className="space-y-3">
           <h3 className="text-sm font-semibold text-muted-foreground">Pending Results</h3>
           {unreleased.map(r => (
-            <div key={r.examId} className="bg-muted/50 rounded-lg p-4 border border-border">
+            <div key={r.sessionId} className="bg-muted/50 rounded-lg p-4 border border-border">
               <p className="font-medium">{r.examTitle}</p>
               <p className="text-sm text-muted-foreground mt-1">Results have not been released yet.</p>
             </div>

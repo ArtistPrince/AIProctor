@@ -7,7 +7,7 @@ import { Switch } from '@/components/ui/switch';
 import { ExamResult } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { Eye } from 'lucide-react';
-import { listFacultyResults } from '@/lib/backendApi';
+import { listFacultyResults, setResultRelease } from '@/lib/backendApi';
 import { useQuery } from '@tanstack/react-query';
 
 const FacultyResultsPage: React.FC = () => {
@@ -30,9 +30,18 @@ const FacultyResultsPage: React.FC = () => {
     }
   }, [error, toast]);
 
-  const toggleRelease = (studentId: string) => {
-    setResults(prev => prev.map(r => r.studentId === studentId ? { ...r, released: !r.released } : r));
-    toast({ title: 'Updated', description: 'Result visibility changed.' });
+  const toggleRelease = async (sessionId: string) => {
+    const target = results.find((row) => row.sessionId === sessionId);
+    if (!target) return;
+
+    const nextReleased = !target.released;
+    try {
+      await setResultRelease(sessionId, nextReleased);
+      setResults(prev => prev.map(r => r.sessionId === sessionId ? { ...r, released: nextReleased } : r));
+      toast({ title: 'Updated', description: 'Result visibility changed.' });
+    } catch (error) {
+      toast({ title: 'Failed to update release state', description: (error as Error).message, variant: 'destructive' });
+    }
   };
 
   const columns = [
@@ -48,7 +57,7 @@ const FacultyResultsPage: React.FC = () => {
       <span className={r.violations > 0 ? 'text-destructive font-medium' : 'text-muted-foreground'}>{r.violations}</span>
     )},
     { key: 'released', label: 'Released', render: (r: ExamResult) => (
-      <Switch checked={r.released} onCheckedChange={() => toggleRelease(r.studentId)} />
+      <Switch checked={r.released} onCheckedChange={() => void toggleRelease(r.sessionId)} />
     ), sortable: false },
   ];
 

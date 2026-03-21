@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from .. import database, models, schemas
@@ -18,6 +19,17 @@ def create_exam(
     target_faculty_id = exam.faculty_id
     if current_user.role == "exam_admin":
         target_faculty_id = current_user.id
+
+    if current_user.role == "institute_admin" and not target_faculty_id:
+        default_faculty = (
+            db.query(models.Faculty)
+            .filter(models.Faculty.institute_id == current_user.institute_id)
+            .order_by(models.Faculty.created_at.asc())
+            .first()
+        )
+        if not default_faculty:
+            raise HTTPException(status_code=400, detail="No faculty found in institute. Create a faculty account first.")
+        target_faculty_id = str(default_faculty.id)
 
     if not target_faculty_id:
         raise HTTPException(status_code=400, detail="faculty_id is required")
@@ -45,7 +57,18 @@ def create_exam(
         end_time=exam.end_time,
     )
     db.add(new_exam)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        message = str(getattr(exc, "orig", exc)).lower()
+        if "exam_code" in message or "duplicate key" in message or "unique" in message:
+            raise HTTPException(status_code=409, detail="Exam with similar generated code already exists")
+        raise HTTPException(status_code=400, detail="Invalid exam data")
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to create exam: {exc}") from exc
+
     db.refresh(new_exam)
     return schemas.ExamOut(
         id=str(new_exam.id),
@@ -94,3 +117,52 @@ def list_exams(
         )
         for exam in exams
     ]
+
+
+@router.put("/exams/{exam_id}", response_model=schemas.ExamOut)
+def update_exam(
+    exam_id: str,
+    payload: schemas.ExamUpdate,
+    db: Session = Depends(database.get_db),
+    current_user=Depends(require_admin),
+):
+    row = db.query(models.Exam).filter(models.Exam.id == exam_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Exam not found")
+
+    if current_user.role != "super_admin" and str(row.institute_id) != str(current_user.institute_id):
+        raise HTTPException(status_code=403, detail="Cannot update exam outside your institute")
+
+    if current_user.role == "exam_admin" and str(row.faculty_id) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Cannot update exams created by other faculty")
+
+    data = payload.model_dump(exclude_unset=True)
+    if "title" in data and data["title"] is not None:
+        row.title = data["title"]
+    if "duration_minutes" in data and data["duration_minutes"] is not None:
+        row.duration_minutes = data["duration_minutes"]
+    if "passing_marks" in data and data["passing_marks"] is not None:
+        row.passing_marks = data["passing_marks"]
+    if "scheduled_time" in data:
+        row.scheduled_time = data["scheduled_time"]
+    if "end_time" in data:
+        row.end_time = data["end_time"]
+
+    db.commit()
+    db.refresh(row)
+    return schemas.ExamOut(
+        id=str(row.id),
+        institute_id=str(row.institute_id),
+        faculty_id=str(row.faculty_id),
+        subject_code=row.subject_code,
+        exam_type=row.exam_type,
+        exam_year=row.exam_year,
+        exam_code=row.exam_code,
+        title=row.title,
+        duration_minutes=row.duration_minutes,
+        passing_marks=row.passing_marks,
+        scheduled_time=row.scheduled_time,
+        end_time=row.end_time,
+        created_at=row.created_at,
+        duration=row.duration_minutes,
+    )

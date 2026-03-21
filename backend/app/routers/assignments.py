@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from .. import database, models, schemas
@@ -100,7 +101,15 @@ def create_assignment(
         batch_id=batch.id,
     )
     db.add(new_assignment)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Invalid assignment data")
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to create assignment: {exc}") from exc
+
     db.refresh(new_assignment)
     return schemas.ExamAssignmentOut(
         id=str(new_assignment.id),

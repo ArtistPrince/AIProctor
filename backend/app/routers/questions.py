@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from .. import database, models, schemas
@@ -42,7 +43,15 @@ def create_question(
         marks=question.marks,
     )
     db.add(new_question)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Invalid question data")
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to create question: {exc}") from exc
+
     db.refresh(new_question)
 
     return schemas.QuestionOut(

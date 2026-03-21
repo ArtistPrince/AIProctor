@@ -3,7 +3,7 @@ import { Batch, Exam, ExamResult, Faculty, Institute, ProctoringSession, Questio
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') || '/api';
 const ACCESS_TOKEN_KEY = 'proctorx_access_token';
 
-type LoginRole = 'admin' | 'student';
+type LoginPortal = 'student' | 'institute' | 'dev';
 
 interface TokenResponse {
   access_token: string;
@@ -24,6 +24,7 @@ interface BackendUser {
   role: string;
   code?: string | null;
   roll_no?: string | null;
+  section?: string | null;
 }
 
 interface BackendInstitute {
@@ -33,6 +34,82 @@ interface BackendInstitute {
   address?: string | null;
   contact_email?: string | null;
   created_at?: string | null;
+}
+
+interface BackendInstituteOverview {
+  institute: {
+    id: string;
+    institute_code: string;
+    name: string;
+    address?: string | null;
+    contact_email?: string | null;
+    created_at?: string | null;
+  };
+  counts: {
+    admins: number;
+    faculties: number;
+    batches: number;
+    students: number;
+    exams: number;
+    sessions: number;
+    violations: number;
+  };
+  admins: Array<{
+    id: string;
+    name: string;
+    email: string;
+    emp_id: string;
+    admin_code?: string | null;
+    created_at?: string | null;
+  }>;
+  faculties: Array<{
+    id: string;
+    name: string;
+    email: string;
+    dept_code: string;
+    emp_id: string;
+    faculty_code?: string | null;
+    created_at?: string | null;
+  }>;
+  batches: Array<{
+    id: string;
+    batch_code?: string | null;
+    course_code: string;
+    batch_year: string;
+    course_name: string;
+    created_at?: string | null;
+  }>;
+  students: Array<{
+    id: string;
+    name: string;
+    email: string;
+    batch_id: string;
+    section: string;
+    roll_no: string;
+    student_code?: string | null;
+    created_at?: string | null;
+  }>;
+  exams: Array<{
+    id: string;
+    title: string;
+    subject_code: string;
+    exam_type: string;
+    exam_year: string;
+    duration_minutes: number;
+    passing_marks: number;
+    scheduled_time?: string | null;
+    end_time?: string | null;
+  }>;
+  sessions: Array<{
+    id: string;
+    exam_id: string;
+    student_id: string;
+    status: string;
+    score?: number | null;
+    violation_found?: boolean;
+    started_at?: string | null;
+    completed_at?: string | null;
+  }>;
 }
 
 interface BackendFaculty {
@@ -137,6 +214,7 @@ function mapUser(payload: BackendUser): User {
     courseName: payload.course_name || undefined,
     code: payload.code || undefined,
     rollNo: payload.roll_no || undefined,
+    section: payload.section || undefined,
   };
 }
 
@@ -203,18 +281,34 @@ function mapExam(row: BackendExam): Exam {
 
 function mapSessionToResult(row: BackendSession, examById: Record<string, Exam>): ExamResult {
   const exam = examById[row.exam_id];
-  const totalMarks = exam?.totalMarks || 100;
-  const score = row.score ?? 0;
+  let totalMarks = exam?.totalMarks || 100;
+  const rawScore = row.score ?? 0;
+  let score = Math.max(0, rawScore);
+
+  // Legacy/seeded rows may store score as percentage (0-100) while exam.totalMarks
+  // may be mapped from passing marks (e.g., 40/50). Normalize to avoid >100% output.
+  let percentage = 0;
+  if (totalMarks > 0 && score > totalMarks) {
+    totalMarks = 100;
+    score = Math.min(score, 100);
+    percentage = Math.round(score);
+  } else {
+    percentage = totalMarks > 0 ? Math.round((score / totalMarks) * 100) : 0;
+  }
+
+  percentage = Math.min(Math.max(percentage, 0), 100);
+
   return {
+    sessionId: row.id,
     studentId: row.student_id,
     studentName: row.student_name || row.student_code || 'Student',
     examId: row.exam_id,
     examTitle: row.exam_title || exam?.title || row.exam_code || 'Exam',
     score,
     totalMarks,
-    percentage: totalMarks > 0 ? Math.round((score / totalMarks) * 100) : 0,
+    percentage,
     violations: row.violation_logs_id ? 1 : 0,
-    released: row.status === 'submitted' || row.status === 'completed',
+    released: row.status === 'completed',
   };
 }
 
@@ -260,11 +354,11 @@ export function clearAccessToken(): void {
   localStorage.removeItem(ACCESS_TOKEN_KEY);
 }
 
-export async function loginRequest(email: string, password: string, role: LoginRole): Promise<TokenResponse> {
+export async function loginRequest(email: string, password: string, portal: LoginPortal): Promise<TokenResponse> {
   const body = new FormData();
   body.append('email', email);
   body.append('password', password);
-  body.append('role', role);
+  body.append('portal', portal);
   return apiRequest<TokenResponse>('/login', { method: 'POST', body });
 }
 
@@ -284,6 +378,8 @@ export async function listInstitutes(): Promise<Institute[]> {
   ]);
 
   return rows.map((row) => {
+    const instituteAdmins = users.filter((user) => user.role === 'institute_admin' && user.institute_id === row.id);
+    const primaryAdmin = instituteAdmins[0];
     const instituteBatches = batches.filter((batch) => batch.institute_id === row.id);
     const instituteUsers = users.filter((user) => user.institute_id === row.id);
     const instituteFaculties = faculties.filter((faculty) => faculty.institute_id === row.id);
@@ -294,6 +390,8 @@ export async function listInstitutes(): Promise<Institute[]> {
 
     return {
       ...mapInstitute(row),
+      adminName: primaryAdmin?.name || 'Not assigned',
+      adminEmail: primaryAdmin?.email || '',
       totalBatches: instituteBatches.length,
       totalStudents: instituteUsers.filter((user) => user.role === 'student').length,
       totalFaculties: instituteFaculties.length,
@@ -320,6 +418,66 @@ export async function createInstitute(payload: {
     }),
   });
   return mapInstitute(row);
+}
+
+export async function updateInstitute(
+  instituteId: string,
+  payload: { name?: string; address?: string; contactEmail?: string }
+): Promise<Institute> {
+  const row = await apiRequest<BackendInstitute>(`/institutes/${instituteId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: payload.name,
+      address: payload.address,
+      contact_email: payload.contactEmail,
+    }),
+  });
+  return mapInstitute(row);
+}
+
+export async function deleteInstitute(instituteId: string): Promise<void> {
+  await apiRequest<void>(`/institutes/${instituteId}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function resetInstituteAdminPassword(payload: {
+  instituteId: string;
+  newPassword: string;
+  adminEmail?: string;
+}): Promise<number> {
+  const row = await apiRequest<{ updated: number }>(`/institutes/${payload.instituteId}/admin-password`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      new_password: payload.newPassword,
+      admin_email: payload.adminEmail || undefined,
+    }),
+  });
+  return row.updated;
+}
+
+export async function getInstituteOverview(instituteId: string): Promise<BackendInstituteOverview> {
+  return apiRequest<BackendInstituteOverview>(`/institutes/${instituteId}/overview`);
+}
+
+export async function importInstituteAdmins(
+  instituteId: string,
+  rows: Array<{ name: string; email: string; password: string; empId?: string }>
+): Promise<{ created: number }> {
+  return apiRequest<{ created: number }>(`/institutes/${instituteId}/admins/import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      admins: rows.map((row) => ({
+        name: row.name,
+        email: row.email,
+        password: row.password,
+        emp_id: row.empId || undefined,
+      })),
+    }),
+  });
 }
 
 export async function createUser(payload: {
@@ -382,6 +540,39 @@ export async function createFaculty(payload: {
   return mapFaculty(row);
 }
 
+export async function importFaculties(
+  rows: Array<{ name: string; email: string; deptCode: string; empId?: string }>
+): Promise<{ created: number }> {
+  return apiRequest<{ created: number }>('/faculties/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      faculties: rows.map((row) => ({
+        name: row.name,
+        email: row.email,
+        dept_code: row.deptCode,
+        emp_id: row.empId || undefined,
+      })),
+    }),
+  });
+}
+
+export async function updateFaculty(
+  facultyId: string,
+  payload: { name?: string; email?: string; deptCode?: string }
+): Promise<Faculty> {
+  const row = await apiRequest<BackendFaculty>(`/faculties/${facultyId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: payload.name,
+      email: payload.email,
+      dept_code: payload.deptCode,
+    }),
+  });
+  return mapFaculty(row);
+}
+
 export async function listBatches(): Promise<Batch[]> {
   const [rows, assignments, sessions, users] = await Promise.all([
     apiRequest<BackendBatch[]>('/batches/'),
@@ -390,12 +581,12 @@ export async function listBatches(): Promise<Batch[]> {
     listUsers().catch(() => []),
   ]);
 
-  const studentBatchById = users.reduce<Record<string, string>>((acc, user) => {
+  const studentBatchById: Record<string, string> = {};
+  users.forEach((user) => {
     if (user.role === 'student' && user.batch_id) {
-      acc[user.id] = user.batch_id;
+      studentBatchById[user.id] = user.batch_id;
     }
-    return acc;
-  }, {});
+  });
 
   return rows.map((row) => {
     const mapped = mapBatch(row);
@@ -437,6 +628,59 @@ export async function createBatch(payload: {
     }),
   });
   return mapBatch(row);
+}
+
+export async function importBatches(
+  rows: Array<{ courseName: string; courseCode: string; batchYear: string }>
+): Promise<{ created: number }> {
+  return apiRequest<{ created: number }>('/batches/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      batches: rows.map((row) => ({
+        course_name: row.courseName,
+        course_code: row.courseCode,
+        batch_year: row.batchYear,
+      })),
+    }),
+  });
+}
+
+export async function updateStudent(
+  studentId: string,
+  payload: { name?: string; email?: string; batchId?: string; section?: string; rollNo?: string }
+): Promise<BackendUser> {
+  return apiRequest<BackendUser>(`/students/${studentId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: payload.name,
+      email: payload.email,
+      batch_id: payload.batchId,
+      section: payload.section,
+      roll_no: payload.rollNo,
+    }),
+  });
+}
+
+export async function importStudents(
+  rows: Array<{ name: string; email: string; batchCode?: string; batchId?: string; section: string; rollNo: string; password?: string }>
+): Promise<{ created: number }> {
+  return apiRequest<{ created: number }>('/students/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      students: rows.map((row) => ({
+        name: row.name,
+        email: row.email,
+        batch_code: row.batchCode || undefined,
+        batch_id: row.batchId || undefined,
+        section: row.section,
+        roll_no: row.rollNo,
+        password: row.password || undefined,
+      })),
+    }),
+  });
 }
 
 export async function listExams(): Promise<Exam[]> {
@@ -495,6 +739,24 @@ export async function createExam(payload: {
   return mapExam(row);
 }
 
+export async function updateExam(
+  examId: string,
+  payload: { title?: string; duration?: number; passingMarks?: number; scheduledTime?: string; endTime?: string }
+): Promise<Exam> {
+  const row = await apiRequest<BackendExam>(`/exams/${examId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      title: payload.title,
+      duration: payload.duration,
+      passing_marks: payload.passingMarks,
+      scheduled_time: payload.scheduledTime,
+      end_time: payload.endTime,
+    }),
+  });
+  return mapExam(row);
+}
+
 export async function createQuestion(payload: {
   examId: string;
   text: string;
@@ -542,25 +804,53 @@ export async function listFacultyResults(): Promise<ExamResult[]> {
     apiRequest<BackendSession[]>('/sessions/'),
     listExams(),
   ]);
-  const examById = exams.reduce<Record<string, Exam>>((acc, exam) => {
-    acc[exam.id] = exam;
-    return acc;
-  }, {});
+  const examById: Record<string, Exam> = {};
+  exams.forEach((exam) => {
+    examById[exam.id] = exam;
+  });
   return sessions.map((row) => mapSessionToResult(row, examById));
 }
 
 export async function listStudentResults(): Promise<ExamResult[]> {
   const rows = await apiRequest<BackendSession[]>('/sessions/me/details');
   const exams = await listMyAssignments().catch(() => []);
-  const examById = exams.reduce<Record<string, Exam>>((acc, exam) => {
-    acc[exam.id] = exam;
-    return acc;
-  }, {});
+  const examById: Record<string, Exam> = {};
+  exams.forEach((exam) => {
+    examById[exam.id] = exam;
+  });
   return rows.map((row) => mapSessionToResult(row, examById));
 }
 
 export async function listSessions(): Promise<BackendSession[]> {
   return apiRequest<BackendSession[]>('/sessions/');
+}
+
+export async function createOrUpdateSession(payload: {
+  studentId: string;
+  examId: string;
+  status: 'in_progress' | 'submitted' | 'completed' | 'terminated' | 'missed';
+  score?: number;
+  integrity?: number;
+}): Promise<BackendSession> {
+  return apiRequest<BackendSession>('/sessions/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      student_id: payload.studentId,
+      exam_id: payload.examId,
+      status: payload.status,
+      score: payload.score,
+      integrity: payload.integrity,
+    }),
+  });
+}
+
+export async function setResultRelease(sessionId: string, released: boolean): Promise<void> {
+  await apiRequest(`/sessions/${sessionId}/release`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ released }),
+  });
 }
 
 export async function listProctoringSessions(): Promise<ProctoringSession[]> {

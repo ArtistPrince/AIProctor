@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
@@ -42,7 +43,15 @@ def create_batch(
         course_name=batch.course_name,
     )
     db.add(new_batch)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        message = str(getattr(exc, "orig", exc)).lower()
+        if "batch_code" in message or "duplicate key" in message or "unique" in message:
+            raise HTTPException(status_code=409, detail="Batch already exists")
+        raise HTTPException(status_code=400, detail="Invalid batch data")
+
     db.refresh(new_batch)
     return schemas.BatchOut(
         id=str(new_batch.id),
@@ -144,3 +153,76 @@ def add_members_to_batch(
         members=members,
         created_at=batch.created_at,
     )
+
+
+@router.post("/batches/import", response_model=schemas.BatchImportResponse)
+def import_batches(
+    payload: schemas.BatchImportRequest,
+    db: Session = Depends(database.get_db),
+    current_user=Depends(require_batch_manage),
+):
+    institute_id = current_user.institute_id
+    if current_user.role == "super_admin":
+        raise HTTPException(status_code=400, detail="Use institute admin account for batch import")
+    if not institute_id:
+        raise HTTPException(status_code=400, detail="institute_id is required")
+
+    rows = payload.batches or []
+    if not rows:
+        raise HTTPException(status_code=400, detail="CSV has no batch rows")
+
+    errors: list[str] = []
+    seen_course_year: set[str] = set()
+
+    for index, row in enumerate(rows, start=1):
+        course_name = row.course_name.strip()
+        course_code = row.course_code.strip().upper()
+        batch_year = str(row.batch_year).strip()
+
+        if not course_name:
+            errors.append(f"Row {index}: course_name is required")
+        if not course_code:
+            errors.append(f"Row {index}: course_code is required")
+        if not batch_year:
+            errors.append(f"Row {index}: batch_year is required")
+
+        if course_code and batch_year:
+            key = f"{course_code}:{batch_year}"
+            if key in seen_course_year:
+                errors.append(f"Row {index}: duplicate course_code + batch_year in CSV ({course_code}, {batch_year})")
+            seen_course_year.add(key)
+
+    if errors:
+        raise HTTPException(status_code=400, detail="CSV validation failed: " + "; ".join(errors))
+
+    existing = db.query(models.Batch).filter(models.Batch.institute_id == institute_id).all()
+    existing_course_year = {f"{row.course_code.strip().upper()}:{str(row.batch_year).strip()}" for row in existing}
+
+    duplicate_errors: list[str] = []
+    for index, row in enumerate(rows, start=1):
+        course_code = row.course_code.strip().upper()
+        batch_year = str(row.batch_year).strip()
+        key = f"{course_code}:{batch_year}"
+        if key in existing_course_year:
+            duplicate_errors.append(f"Row {index}: batch already exists ({course_code}, {batch_year})")
+
+    if duplicate_errors:
+        raise HTTPException(status_code=409, detail="Redundant data found: " + "; ".join(duplicate_errors))
+
+    ensure_tenant_partitions(db, institute_id)
+
+    try:
+        for row in rows:
+            entity = models.Batch(
+                institute_id=institute_id,
+                course_code=row.course_code.strip().upper(),
+                batch_year=str(row.batch_year).strip(),
+                course_name=row.course_name.strip(),
+            )
+            db.add(entity)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to import batches: {exc}") from exc
+
+    return {"created": len(rows)}

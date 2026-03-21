@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { ChevronLeft, ChevronRight, Search, Download, ArrowUpDown } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Search, Download, ArrowUpDown, Upload } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
+import { CsvRow, getCsvValue, parseCsv } from '@/lib/csv';
 
 interface Column<T> {
   key: string;
@@ -20,18 +22,33 @@ interface DataTableProps<T> {
   searchable?: boolean;
   exportable?: boolean;
   onExport?: () => void;
+  importable?: boolean;
+  onImport?: (rows: CsvRow[]) => Promise<void> | void;
   actions?: (item: T) => React.ReactNode;
 }
 
 function DataTable<T extends Record<string, unknown>>({
-  data, columns, pageSize = 10, searchable = true, exportable = true, onExport, actions,
+  data,
+  columns,
+  pageSize = 10,
+  searchable = true,
+  exportable = true,
+  onExport,
+  importable = true,
+  onImport,
+  actions,
 }: DataTableProps<T>) {
+  const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [localImportedRows, setLocalImportedRows] = useState<T[]>([]);
 
-  const filtered = data.filter((item) =>
+  const tableData = localImportedRows.length ? [...localImportedRows, ...data] : data;
+
+  const filtered = tableData.filter((item) =>
     Object.values(item).some((val) =>
       String(val).toLowerCase().includes(search.toLowerCase())
     )
@@ -63,6 +80,43 @@ function DataTable<T extends Record<string, unknown>>({
     URL.revokeObjectURL(url);
   };
 
+  const convertCsvRowsToTableRows = (rows: CsvRow[]): T[] => {
+    return rows.map((row) => {
+      const converted = columns.reduce<Record<string, unknown>>((acc, column) => {
+        acc[column.key] = getCsvValue(row, [column.key, column.label]);
+        return acc;
+      }, {});
+      return converted as T;
+    });
+  };
+
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) {
+      return;
+    }
+
+    try {
+      const content = await file.text();
+      const rows = parseCsv(content);
+      if (!rows.length) {
+        toast({ title: 'Import failed', description: 'CSV has no data rows.', variant: 'destructive' });
+        return;
+      }
+
+      if (onImport) {
+        await onImport(rows);
+      } else {
+        const convertedRows = convertCsvRowsToTableRows(rows);
+        setLocalImportedRows(convertedRows);
+        toast({ title: 'Import complete', description: `${convertedRows.length} row(s) loaded.` });
+      }
+    } catch (error) {
+      toast({ title: 'Import failed', description: (error as Error).message, variant: 'destructive' });
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-4">
@@ -77,11 +131,27 @@ function DataTable<T extends Record<string, unknown>>({
             />
           </div>
         )}
-        {exportable && (
-          <Button variant="outline" size="sm" onClick={handleExport}>
-            <Download className="h-4 w-4 mr-1.5" />Export CSV
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {importable && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv,text/csv"
+                onChange={handleFileSelect}
+                className="hidden"
+              />
+              <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+                <Upload className="h-4 w-4 mr-1.5" />Import CSV
+              </Button>
+            </>
+          )}
+          {exportable && (
+            <Button variant="outline" size="sm" onClick={handleExport}>
+              <Download className="h-4 w-4 mr-1.5" />Export CSV
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="rounded-lg border bg-card overflow-hidden">

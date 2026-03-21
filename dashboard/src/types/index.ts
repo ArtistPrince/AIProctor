@@ -109,6 +109,7 @@ export interface Violation {
 }
 
 export interface ExamResult {
+  sessionId: string;
   studentId: string;
   studentName: string;
   examId: string;
