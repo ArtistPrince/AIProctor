@@ -4,30 +4,31 @@ import PageHeader from '@/components/dashboard/PageHeader';
 import DataTable from '@/components/dashboard/DataTable';
 import StatusBadge from '@/components/dashboard/StatusBadge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Download, Plus, Upload } from 'lucide-react';
+import { Download, Pencil, Plus, Trash2, Upload } from 'lucide-react';
 import { Batch } from '@/types';
 import { useToast } from '@/hooks/use-toast';
-import { createBatch, importBatches, listBatches } from '@/lib/backendApi';
+import { createBatch, hardDeleteBatch, importBatches, listBatches, updateBatch } from '@/lib/backendApi';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getCsvValue, parseCsv } from '@/lib/csv';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 
 const BatchesPage: React.FC = () => {
   const [batches, setBatches] = useState<Batch[]>([]);
   const [addOpen, setAddOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [importingCsv, setImportingCsv] = useState(false);
+  const [editingBatchId, setEditingBatchId] = useState<string | null>(null);
+  const [deletingBatch, setDeletingBatch] = useState<Batch | null>(null);
+  const [deleteConfirmed, setDeleteConfirmed] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
   const [form, setForm] = useState({ name: '', department: '', year: '' });
+  const [editForm, setEditForm] = useState({ name: '', department: '', year: '' });
   const csvInputRef = useRef<HTMLInputElement | null>(null);
   const { toast } = useToast();
   const { user } = useAuth();
@@ -149,6 +150,81 @@ const BatchesPage: React.FC = () => {
     }
   };
 
+  const openEdit = (item: Batch) => {
+    setEditingBatchId(item.id);
+    setEditForm({
+      name: item.name,
+      department: item.department,
+      year: item.year,
+    });
+    setEditOpen(true);
+  };
+
+  const handleEditSave = async () => {
+    if (!editingBatchId) return;
+    if (!editForm.name || !editForm.department || !editForm.year) {
+      toast({ title: 'Error', description: 'Batch name, department, and year are required', variant: 'destructive' });
+      return;
+    }
+
+    try {
+      const updated = await updateBatch(editingBatchId, {
+        courseName: editForm.name,
+        courseCode: editForm.department.replace(/\s+/g, '').toUpperCase(),
+        batchYear: editForm.year,
+      });
+
+      setBatches((prev) => prev.map((item) => (
+        item.id === editingBatchId ? { ...item, ...updated } : item
+      )));
+      await queryClient.invalidateQueries({ queryKey: ['batches'] });
+      setEditOpen(false);
+      setEditingBatchId(null);
+      toast({ title: 'Batch Updated' });
+    } catch (error) {
+      toast({ title: 'Failed to update batch', description: (error as Error).message, variant: 'destructive' });
+    }
+  };
+
+  const openDeleteDialog = (item: Batch) => {
+    setDeletingBatch(item);
+    setDeleteConfirmed(false);
+    setDeletePassword('');
+    setDeleteOpen(true);
+  };
+
+  const handleDelete = async () => {
+    if (!deletingBatch) return;
+    if (!deleteConfirmed || !deletePassword.trim()) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please check the delete confirmation and enter your password.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setDeleteSubmitting(true);
+    try {
+      await hardDeleteBatch({
+        batchId: deletingBatch.id,
+        confirmDelete: deleteConfirmed,
+        password: deletePassword,
+      });
+      setBatches((prev) => prev.filter((item) => item.id !== deletingBatch.id));
+      await queryClient.invalidateQueries({ queryKey: ['batches'] });
+      setDeleteOpen(false);
+      setDeletingBatch(null);
+      setDeleteConfirmed(false);
+      setDeletePassword('');
+      toast({ title: 'Batch Deleted', description: 'Batch was deleted permanently.' });
+    } catch (error) {
+      toast({ title: 'Failed to delete batch', description: (error as Error).message, variant: 'destructive' });
+    } finally {
+      setDeleteSubmitting(false);
+    }
+  };
+
   const columns = [
     { key: 'name', label: 'Batch' }, { key: 'department', label: 'Department' }, { key: 'year', label: 'Year' },
     { key: 'totalStudents', label: 'Students' }, { key: 'totalExams', label: 'Exams' },
@@ -160,24 +236,14 @@ const BatchesPage: React.FC = () => {
     <DashboardLayout>
       <PageHeader title="Batches" subtitle="Academic batch management" breadcrumbs={[{ label: 'Dashboard', path: '/institute' }, { label: 'Batches' }]}
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" onClick={exportBatches}><Download className="h-4 w-4 mr-1.5" />Export CSV</Button>
+            <Button className="bg-accent text-accent-foreground hover:bg-accent/90" onClick={() => setAddOpen(true)}><Plus className="h-4 w-4 mr-1.5" />Create Batch</Button>
             <input ref={csvInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleImportCsv} />
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button className="bg-accent text-accent-foreground hover:bg-accent/90"><Plus className="h-4 w-4 mr-1.5" />Create Batch</Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuItem onSelect={() => setAddOpen(true)}>Manual Entry</DropdownMenuItem>
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>Import CSV</DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent>
-                    <DropdownMenuItem onSelect={downloadTemplate}><Download className="h-4 w-4 mr-2" />Get Template</DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => csvInputRef.current?.click()} disabled={importingCsv}><Upload className="h-4 w-4 mr-2" />{importingCsv ? 'Importing...' : 'Import'}</DropdownMenuItem>
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <div className="flex items-center gap-1 rounded-full border border-border bg-background px-1 py-1">
+              <Button size="sm" variant="ghost" onClick={downloadTemplate}><Download className="h-4 w-4 mr-1.5" />Get Template</Button>
+              <Button size="sm" variant="ghost" onClick={() => csvInputRef.current?.click()} disabled={importingCsv}><Upload className="h-4 w-4 mr-1.5" />{importingCsv ? 'Importing...' : 'Import'}</Button>
+            </div>
           </div>
         }
       />
@@ -194,7 +260,78 @@ const BatchesPage: React.FC = () => {
             </DialogContent>
           </Dialog>
 
-      <DataTable data={batches as unknown as Record<string, unknown>[]} columns={columns as any} importable={false} exportable={false} />
+      <DataTable
+        data={batches as unknown as Record<string, unknown>[]}
+        columns={columns as any}
+        importable={false}
+        exportable={false}
+        actions={(item: any) => (
+          <div className="flex gap-1">
+            <Button variant="ghost" size="sm" onClick={() => openEdit(item as Batch)}><Pencil className="h-4 w-4" /></Button>
+            <Button variant="ghost" size="sm" onClick={() => openDeleteDialog(item as Batch)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
+          </div>
+        )}
+      />
+
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Edit Batch</DialogTitle></DialogHeader>
+          <div className="space-y-3 py-2">
+            <Input placeholder="Batch Name *" value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} />
+            <Input placeholder="Department *" value={editForm.department} onChange={e => setEditForm({ ...editForm, department: e.target.value })} />
+            <Input placeholder="Academic Year *" value={editForm.year} onChange={e => setEditForm({ ...editForm, year: e.target.value })} />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
+            <Button onClick={handleEditSave} className="bg-accent text-accent-foreground">Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={deleteOpen}
+        onOpenChange={(open) => {
+          setDeleteOpen(open);
+          if (!open) {
+            setDeletingBatch(null);
+            setDeleteConfirmed(false);
+            setDeletePassword('');
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader><DialogTitle>Delete batch?</DialogTitle></DialogHeader>
+          <div className="space-y-3 text-sm">
+            <div>
+              This will permanently delete <span className="font-medium">{deletingBatch?.name || 'this batch'}</span>. This action cannot be undone.
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox id="confirm-batch-delete" checked={deleteConfirmed} onCheckedChange={(checked) => setDeleteConfirmed(checked === true)} />
+              <Label htmlFor="confirm-batch-delete">Yes, I want to delete this batch.</Label>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="batch-delete-password">Enter your password</Label>
+              <Input
+                id="batch-delete-password"
+                type="password"
+                value={deletePassword}
+                onChange={(e) => setDeletePassword(e.target.value)}
+                placeholder="Your account password"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteOpen(false)} disabled={deleteSubmitting}>Cancel</Button>
+            <Button
+              variant="destructive"
+              disabled={!deleteConfirmed || !deletePassword.trim() || deleteSubmitting}
+              onClick={() => void handleDelete()}
+            >
+              {deleteSubmitting ? 'Deleting...' : 'Delete Permanently'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 };

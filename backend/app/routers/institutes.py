@@ -5,7 +5,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from .. import database, models, schemas
-from ..security import get_password_hash, require_role
+from ..security import get_password_hash, require_role, verify_password
 from ..utils.partitions import ensure_tenant_partitions
 
 router = APIRouter()
@@ -229,10 +229,17 @@ def update_institute(
 @router.delete("/institutes/{institute_id}", status_code=204)
 def delete_institute(
     institute_id: str,
+    payload: schemas.PasswordConfirmedDeleteRequest,
     db: Session = Depends(database.get_db),
     current_user=Depends(require_super_admin),
 ):
-    del current_user
+    if not payload.confirm_delete:
+        raise HTTPException(status_code=400, detail="Please confirm deletion checkbox")
+    if not payload.password:
+        raise HTTPException(status_code=400, detail="Password is required")
+    if not current_user.password_hash or not verify_password(payload.password, current_user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid password")
+
     institute = db.query(models.Institute).filter(models.Institute.id == institute_id).first()
     if not institute:
         raise HTTPException(status_code=404, detail="Institute not found")

@@ -2,14 +2,17 @@ import React, { useEffect, useState } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import PageHeader from '@/components/dashboard/PageHeader';
 import { Button } from '@/components/ui/button';
+import { Calendar } from '@/components/ui/calendar';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate } from 'react-router-dom';
 import { Batch, Question } from '@/types';
-import { Plus, Trash2, ChevronRight, ChevronLeft, Check } from 'lucide-react';
+import { Plus, Trash2, ChevronRight, ChevronLeft, Check, ChevronDown } from 'lucide-react';
 import { createAssignment, createExam, createQuestion, listBatches } from '@/lib/backendApi';
 import { useQuery } from '@tanstack/react-query';
 
@@ -30,7 +33,19 @@ const CreateExamPage: React.FC = () => {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [qForm, setQForm] = useState({ type: 'mcq' as 'mcq' | 'short_answer', text: '', options: ['', '', '', ''], correctAnswer: '', marks: 2 });
   const [selectedBatches, setSelectedBatches] = useState<string[]>([]);
-  const [schedule, setSchedule] = useState({ startDate: '', endDate: '', lateEntry: false });
+  const [schedule, setSchedule] = useState({
+    startDate: '',
+    startHour: '10',
+    startMinute: '30',
+    startAmPm: 'AM',
+    endDate: '',
+    endHour: '12',
+    endMinute: '30',
+    endAmPm: 'PM',
+    lateEntry: false,
+  });
+  const [startDateOpen, setStartDateOpen] = useState(false);
+  const [endDateOpen, setEndDateOpen] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
   const { data: batches = [], error } = useQuery<Batch[]>({
@@ -51,6 +66,25 @@ const CreateExamPage: React.FC = () => {
   };
 
   const removeQuestion = (id: string) => setQuestions(questions.filter(q => q.id !== id));
+
+  const formatDateLabel = (dateValue: string) => {
+    if (!dateValue) return 'Select date';
+    const parsed = new Date(`${dateValue}T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) return 'Select date';
+    return parsed.toLocaleDateString();
+  };
+
+  const buildDateTime = (dateValue: string, hour: string, minute: string, amPm: string) => {
+    if (!dateValue || !hour || !minute || !amPm) return null;
+    let parsedHour = Number.parseInt(hour, 10);
+    if (Number.isNaN(parsedHour)) return null;
+    if (amPm === 'PM' && parsedHour < 12) parsedHour += 12;
+    if (amPm === 'AM' && parsedHour === 12) parsedHour = 0;
+    const timeValue = `${parsedHour.toString().padStart(2, '0')}:${minute}:00`;
+    const parsed = new Date(`${dateValue}T${timeValue}`);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed;
+  };
 
   const handlePublish = async () => {
     if (!exam.title.trim()) {
@@ -73,7 +107,18 @@ const CreateExamPage: React.FC = () => {
       toast({ title: 'Validation Error', description: 'Assign at least one batch before publishing.', variant: 'destructive' });
       return;
     }
-    if (schedule.startDate && schedule.endDate && new Date(schedule.endDate) <= new Date(schedule.startDate)) {
+    const startAt = buildDateTime(schedule.startDate, schedule.startHour, schedule.startMinute, schedule.startAmPm);
+    const endAt = buildDateTime(schedule.endDate, schedule.endHour, schedule.endMinute, schedule.endAmPm);
+
+    if (schedule.startDate && !startAt) {
+      toast({ title: 'Validation Error', description: 'Invalid start date/time.', variant: 'destructive' });
+      return;
+    }
+    if (schedule.endDate && !endAt) {
+      toast({ title: 'Validation Error', description: 'Invalid end date/time.', variant: 'destructive' });
+      return;
+    }
+    if (startAt && endAt && endAt <= startAt) {
       toast({ title: 'Validation Error', description: 'End time must be after start time.', variant: 'destructive' });
       return;
     }
@@ -87,8 +132,8 @@ const CreateExamPage: React.FC = () => {
         examYear: exam.examYear,
         duration: exam.duration,
         passingMarks: Math.max(1, Math.floor(exam.totalMarks * 0.4)),
-        scheduledTime: schedule.startDate ? new Date(schedule.startDate).toISOString() : undefined,
-        endTime: schedule.endDate ? new Date(schedule.endDate).toISOString() : undefined,
+        scheduledTime: startAt ? startAt.toISOString() : undefined,
+        endTime: endAt ? endAt.toISOString() : undefined,
       };
 
       let createdExam;
@@ -238,13 +283,117 @@ const CreateExamPage: React.FC = () => {
         {step === 4 && (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <label className="text-sm font-medium">Start Date & Time</label>
-                <Input type="datetime-local" value={schedule.startDate} onChange={e => setSchedule({ ...schedule, startDate: e.target.value })} />
+              <div className="space-y-3">
+                <Label htmlFor="start-date" className="px-1">Start Date</Label>
+                <Popover open={startDateOpen} onOpenChange={setStartDateOpen}>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" id="start-date" className="w-full justify-between font-normal">
+                      {formatDateLabel(schedule.startDate)}
+                      <ChevronDown className="h-4 w-4" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto overflow-hidden p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={schedule.startDate ? new Date(`${schedule.startDate}T00:00:00`) : undefined}
+                      onSelect={(date) => {
+                        if (!date) return;
+                        const y = date.getFullYear();
+                        const m = `${date.getMonth() + 1}`.padStart(2, '0');
+                        const d = `${date.getDate()}`.padStart(2, '0');
+                        setSchedule((prev) => ({ ...prev, startDate: `${y}-${m}-${d}` }));
+                        setStartDateOpen(false);
+                      }}
+                      captionLayout="dropdown"
+                    />
+                  </PopoverContent>
+                </Popover>
+                <div className="space-y-2">
+                  <Label htmlFor="time-from" className="px-1">From</Label>
+                  <div className="flex items-center gap-2">
+                    <Select value={schedule.startHour} onValueChange={(value) => setSchedule((prev) => ({ ...prev, startHour: value }))}>
+                      <SelectTrigger id="time-from" className="w-[72px]"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {Array.from({ length: 12 }, (_, index) => {
+                          const value = (index + 1).toString().padStart(2, '0');
+                          return <SelectItem key={value} value={value}>{value}</SelectItem>;
+                        })}
+                      </SelectContent>
+                    </Select>
+                    <span>:</span>
+                    <Select value={schedule.startMinute} onValueChange={(value) => setSchedule((prev) => ({ ...prev, startMinute: value }))}>
+                      <SelectTrigger className="w-[78px]"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {['00', '15', '30', '45'].map((value) => (
+                          <SelectItem key={value} value={value}>{value}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Select value={schedule.startAmPm} onValueChange={(value) => setSchedule((prev) => ({ ...prev, startAmPm: value }))}>
+                      <SelectTrigger className="w-[78px]"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="AM">AM</SelectItem>
+                        <SelectItem value="PM">PM</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
               </div>
-              <div className="space-y-1">
-                <label className="text-sm font-medium">End Date & Time</label>
-                <Input type="datetime-local" value={schedule.endDate} onChange={e => setSchedule({ ...schedule, endDate: e.target.value })} />
+              <div className="space-y-3">
+                <Label htmlFor="end-date" className="px-1">End Date</Label>
+                <Popover open={endDateOpen} onOpenChange={setEndDateOpen}>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" id="end-date" className="w-full justify-between font-normal">
+                      {formatDateLabel(schedule.endDate)}
+                      <ChevronDown className="h-4 w-4" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto overflow-hidden p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={schedule.endDate ? new Date(`${schedule.endDate}T00:00:00`) : undefined}
+                      onSelect={(date) => {
+                        if (!date) return;
+                        const y = date.getFullYear();
+                        const m = `${date.getMonth() + 1}`.padStart(2, '0');
+                        const d = `${date.getDate()}`.padStart(2, '0');
+                        setSchedule((prev) => ({ ...prev, endDate: `${y}-${m}-${d}` }));
+                        setEndDateOpen(false);
+                      }}
+                      captionLayout="dropdown"
+                    />
+                  </PopoverContent>
+                </Popover>
+                <div className="space-y-2">
+                  <Label htmlFor="time-to" className="px-1">To</Label>
+                  <div className="flex items-center gap-2">
+                    <Select value={schedule.endHour} onValueChange={(value) => setSchedule((prev) => ({ ...prev, endHour: value }))}>
+                      <SelectTrigger id="time-to" className="w-[72px]"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {Array.from({ length: 12 }, (_, index) => {
+                          const value = (index + 1).toString().padStart(2, '0');
+                          return <SelectItem key={value} value={value}>{value}</SelectItem>;
+                        })}
+                      </SelectContent>
+                    </Select>
+                    <span>:</span>
+                    <Select value={schedule.endMinute} onValueChange={(value) => setSchedule((prev) => ({ ...prev, endMinute: value }))}>
+                      <SelectTrigger className="w-[78px]"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {['00', '15', '30', '45'].map((value) => (
+                          <SelectItem key={value} value={value}>{value}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Select value={schedule.endAmPm} onValueChange={(value) => setSchedule((prev) => ({ ...prev, endAmPm: value }))}>
+                      <SelectTrigger className="w-[78px]"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="AM">AM</SelectItem>
+                        <SelectItem value="PM">PM</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
               </div>
             </div>
             <label className="flex items-center gap-2 cursor-pointer">
@@ -266,8 +415,8 @@ const CreateExamPage: React.FC = () => {
               <div><span className="text-muted-foreground">Exam Year:</span> {exam.examYear}</div>
               <div><span className="text-muted-foreground">Questions:</span> {questions.length}</div>
               <div><span className="text-muted-foreground">Batches:</span> {selectedBatches.length}</div>
-              <div><span className="text-muted-foreground">Start:</span> {schedule.startDate || 'Not set'}</div>
-              <div><span className="text-muted-foreground">End:</span> {schedule.endDate || 'Not set'}</div>
+              <div><span className="text-muted-foreground">Start:</span> {schedule.startDate ? `${schedule.startDate} ${schedule.startHour}:${schedule.startMinute} ${schedule.startAmPm}` : 'Not set'}</div>
+              <div><span className="text-muted-foreground">End:</span> {schedule.endDate ? `${schedule.endDate} ${schedule.endHour}:${schedule.endMinute} ${schedule.endAmPm}` : 'Not set'}</div>
             </div>
           </div>
         )}

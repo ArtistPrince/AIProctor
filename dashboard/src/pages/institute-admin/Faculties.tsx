@@ -4,32 +4,29 @@ import PageHeader from '@/components/dashboard/PageHeader';
 import DataTable from '@/components/dashboard/DataTable';
 import StatusBadge from '@/components/dashboard/StatusBadge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Download, Pencil, Plus, Trash2, Upload } from 'lucide-react';
 import { Faculty } from '@/types';
 import { useToast } from '@/hooks/use-toast';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
-import { createFaculty, importFaculties, listFaculties, updateFaculty } from '@/lib/backendApi';
+import { createFaculty, hardDeleteFaculty, importFaculties, listFaculties, updateFaculty } from '@/lib/backendApi';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getCsvValue, parseCsv } from '@/lib/csv';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 
 const FacultiesPage: React.FC = () => {
   const [faculties, setFaculties] = useState<Faculty[]>([]);
   const [addOpen, setAddOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [importingCsv, setImportingCsv] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [editingFacultyId, setEditingFacultyId] = useState<string | null>(null);
+  const [deletingFaculty, setDeletingFaculty] = useState<Faculty | null>(null);
+  const [deleteConfirmed, setDeleteConfirmed] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
   const csvInputRef = useRef<HTMLInputElement | null>(null);
   const [form, setForm] = useState({ name: '', email: '', department: '', designation: '' });
   const [editForm, setEditForm] = useState({ name: '', email: '', department: '', designation: '' });
@@ -76,9 +73,43 @@ const FacultiesPage: React.FC = () => {
     }
   };
 
-  const handleDelete = (id: string) => {
-    setFaculties(prev => prev.filter(f => f.id !== id));
-    toast({ title: 'Deleted', description: 'Faculty removed.' });
+  const openDeleteDialog = (item: Faculty) => {
+    setDeletingFaculty(item);
+    setDeleteConfirmed(false);
+    setDeletePassword('');
+    setDeleteOpen(true);
+  };
+
+  const handleDelete = async () => {
+    if (!deletingFaculty) return;
+    if (!deleteConfirmed || !deletePassword.trim()) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please check the delete confirmation and enter your password.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setDeleteSubmitting(true);
+    try {
+      await hardDeleteFaculty({
+        facultyId: deletingFaculty.id,
+        confirmDelete: deleteConfirmed,
+        password: deletePassword,
+      });
+      setFaculties((prev) => prev.filter((item) => item.id !== deletingFaculty.id));
+      await queryClient.invalidateQueries({ queryKey: ['faculties'] });
+      setDeleteOpen(false);
+      setDeletingFaculty(null);
+      setDeleteConfirmed(false);
+      setDeletePassword('');
+      toast({ title: 'Faculty Deleted', description: 'Faculty was deleted permanently.' });
+    } catch (error) {
+      toast({ title: 'Failed to delete faculty', description: (error as Error).message, variant: 'destructive' });
+    } finally {
+      setDeleteSubmitting(false);
+    }
   };
 
   const openEdit = (item: Faculty) => {
@@ -219,24 +250,14 @@ const FacultiesPage: React.FC = () => {
     <DashboardLayout>
       <PageHeader title="Faculties" subtitle="Manage faculty members" breadcrumbs={[{ label: 'Dashboard', path: '/institute' }, { label: 'Faculties' }]}
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" onClick={exportFaculties}><Download className="h-4 w-4 mr-1.5" />Export CSV</Button>
+            <Button className="bg-accent text-accent-foreground hover:bg-accent/90" onClick={() => setAddOpen(true)}><Plus className="h-4 w-4 mr-1.5" />Add Faculty</Button>
             <input ref={csvInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleImportCsv} />
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button className="bg-accent text-accent-foreground hover:bg-accent/90"><Plus className="h-4 w-4 mr-1.5" />Add Faculty</Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuItem onSelect={() => setAddOpen(true)}>Manual Entry</DropdownMenuItem>
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>Import CSV</DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent>
-                    <DropdownMenuItem onSelect={downloadTemplate}><Download className="h-4 w-4 mr-2" />Get Template</DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => csvInputRef.current?.click()} disabled={importingCsv}><Upload className="h-4 w-4 mr-2" />{importingCsv ? 'Importing...' : 'Import'}</DropdownMenuItem>
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <div className="flex items-center gap-1 rounded-full border border-border bg-background px-1 py-1">
+              <Button size="sm" variant="ghost" onClick={downloadTemplate}><Download className="h-4 w-4 mr-1.5" />Get Template</Button>
+              <Button size="sm" variant="ghost" onClick={() => csvInputRef.current?.click()} disabled={importingCsv}><Upload className="h-4 w-4 mr-1.5" />{importingCsv ? 'Importing...' : 'Import'}</Button>
+            </div>
           </div>
         }
       />
@@ -261,16 +282,55 @@ const FacultiesPage: React.FC = () => {
         actions={(item: any) => (
           <div className="flex gap-1">
             <Button variant="ghost" size="sm" onClick={() => openEdit(item as Faculty)}><Pencil className="h-4 w-4" /></Button>
-            <AlertDialog>
-              <AlertDialogTrigger asChild><Button variant="ghost" size="sm"><Trash2 className="h-4 w-4 text-destructive" /></Button></AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader><AlertDialogTitle>Delete Faculty?</AlertDialogTitle><AlertDialogDescription>This action cannot be undone.</AlertDialogDescription></AlertDialogHeader>
-                <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleDelete(item.id)}>Delete</AlertDialogAction></AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+            <Button variant="ghost" size="sm" onClick={() => openDeleteDialog(item as Faculty)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
           </div>
         )}
       />
+
+      <Dialog
+        open={deleteOpen}
+        onOpenChange={(open) => {
+          setDeleteOpen(open);
+          if (!open) {
+            setDeletingFaculty(null);
+            setDeleteConfirmed(false);
+            setDeletePassword('');
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader><DialogTitle>Delete faculty?</DialogTitle></DialogHeader>
+          <div className="space-y-3 text-sm">
+            <div>
+              This will permanently delete <span className="font-medium">{deletingFaculty?.name || 'this faculty'}</span>. This action cannot be undone.
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox id="confirm-faculty-delete" checked={deleteConfirmed} onCheckedChange={(checked) => setDeleteConfirmed(checked === true)} />
+              <Label htmlFor="confirm-faculty-delete">Yes, I want to delete this faculty.</Label>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="faculty-delete-password">Enter your password</Label>
+              <Input
+                id="faculty-delete-password"
+                type="password"
+                value={deletePassword}
+                onChange={(e) => setDeletePassword(e.target.value)}
+                placeholder="Your account password"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteOpen(false)} disabled={deleteSubmitting}>Cancel</Button>
+            <Button
+              variant="destructive"
+              disabled={!deleteConfirmed || !deletePassword.trim() || deleteSubmitting}
+              onClick={() => void handleDelete()}
+            >
+              {deleteSubmitting ? 'Deleting...' : 'Delete Permanently'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent>

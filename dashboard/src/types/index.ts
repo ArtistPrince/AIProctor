@@ -91,6 +91,7 @@ export interface Faculty {
 
 export interface ProctoringSession {
   studentId: string;
+  examId: string;
   studentName: string;
   status: 'connected' | 'disconnected' | 'warning';
   riskLevel: 'low' | 'medium' | 'high' | 'critical';

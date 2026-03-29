@@ -10,15 +10,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
 import { createUser, getInstituteOverview, importInstituteAdmins } from '@/lib/backendApi';
 import { getCsvValue, parseCsv } from '@/lib/csv';
@@ -241,9 +232,12 @@ const InstituteDetailsPage: React.FC = () => {
           <Card className="border-kpi-1/30">
             <CardHeader className="flex-row items-center justify-between space-y-0">
               <CardTitle className="text-lg text-kpi-1">Institute Admins</CardTitle>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Button size="sm" variant="outline" onClick={handleExportAdminsCsv}>
                   <Download className="h-4 w-4 mr-1.5" />Export CSV
+                </Button>
+                <Button size="sm" className="bg-kpi-1 text-white hover:bg-kpi-1/90" onClick={() => setCreateAdminOpen(true)}>
+                  <Plus className="h-4 w-4 mr-1.5" />Create Admin
                 </Button>
                 <input
                   ref={adminCsvInputRef}
@@ -252,29 +246,14 @@ const InstituteDetailsPage: React.FC = () => {
                   className="hidden"
                   onChange={handleImportAdminCsv}
                 />
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button size="sm" className="bg-kpi-1 text-white hover:bg-kpi-1/90">
-                      <Plus className="h-4 w-4 mr-1.5" />Create Admin
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-56">
-                    <DropdownMenuItem onSelect={() => setCreateAdminOpen(true)}>
-                      Manual Entry
-                    </DropdownMenuItem>
-                    <DropdownMenuSub>
-                      <DropdownMenuSubTrigger>Import CSV</DropdownMenuSubTrigger>
-                      <DropdownMenuSubContent>
-                        <DropdownMenuItem onSelect={handleDownloadAdminTemplate}>
-                          <Download className="h-4 w-4 mr-2" />Get Template
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onSelect={() => adminCsvInputRef.current?.click()} disabled={importingAdmins}>
-                          <Upload className="h-4 w-4 mr-2" />{importingAdmins ? 'Importing...' : 'Import'}
-                        </DropdownMenuItem>
-                      </DropdownMenuSubContent>
-                    </DropdownMenuSub>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <div className="flex items-center gap-1 rounded-full border border-border bg-background px-1 py-1">
+                  <Button size="sm" variant="ghost" onClick={handleDownloadAdminTemplate}>
+                    <Download className="h-4 w-4 mr-1.5" />Get Template
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => adminCsvInputRef.current?.click()} disabled={importingAdmins}>
+                    <Upload className="h-4 w-4 mr-1.5" />{importingAdmins ? 'Importing...' : 'Import'}
+                  </Button>
+                </div>
               </div>
             </CardHeader>
             <CardContent>

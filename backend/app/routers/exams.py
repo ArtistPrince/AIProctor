@@ -3,7 +3,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from .. import database, models, schemas
-from ..security import require_role
+from ..security import require_role, verify_password
 from ..utils.partitions import ensure_tenant_partitions
 
 router = APIRouter()
@@ -166,3 +166,49 @@ def update_exam(
         created_at=row.created_at,
         duration=row.duration_minutes,
     )
+
+
+@router.post("/exams/{exam_id}/hard-delete", status_code=204)
+def hard_delete_exam(
+    exam_id: str,
+    payload: schemas.PasswordConfirmedDeleteRequest,
+    db: Session = Depends(database.get_db),
+    current_user=Depends(require_admin),
+):
+    if not payload.confirm_delete:
+        raise HTTPException(status_code=400, detail="Please confirm deletion checkbox")
+    if not payload.password:
+        raise HTTPException(status_code=400, detail="Password is required")
+    if not current_user.password_hash or not verify_password(payload.password, current_user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid password")
+
+    exam = db.query(models.Exam).filter(models.Exam.id == exam_id).first()
+    if not exam:
+        raise HTTPException(status_code=404, detail="Exam not found")
+
+    if current_user.role != "super_admin" and str(exam.institute_id) != str(current_user.institute_id):
+        raise HTTPException(status_code=403, detail="Cannot delete exam outside your institute")
+
+    if current_user.role == "exam_admin" and str(exam.faculty_id) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Cannot delete exams created by other faculty")
+
+    try:
+        db.query(models.Question).filter(
+            models.Question.exam_id == exam.id,
+            models.Question.institute_id == exam.institute_id,
+        ).delete(synchronize_session=False)
+        db.query(models.ExamAssignment).filter(
+            models.ExamAssignment.exam_id == exam.id,
+            models.ExamAssignment.institute_id == exam.institute_id,
+        ).delete(synchronize_session=False)
+        db.query(models.ExamSession).filter(
+            models.ExamSession.exam_id == exam.id,
+            models.ExamSession.institute_id == exam.institute_id,
+        ).delete(synchronize_session=False)
+        db.delete(exam)
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to delete exam: {exc}") from exc
+
+    return None

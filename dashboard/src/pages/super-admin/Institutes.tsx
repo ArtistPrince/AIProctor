@@ -5,8 +5,10 @@ import DataTable from '@/components/dashboard/DataTable';
 import StatusBadge from '@/components/dashboard/StatusBadge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { Label } from '@/components/ui/label';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Plus, Eye, Pencil, KeyRound, Ban, CheckCircle, Trash2 } from 'lucide-react';
 import { Institute } from '@/types';
@@ -20,11 +22,16 @@ const InstitutesPage: React.FC = () => {
   const [addOpen, setAddOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [editingInstituteId, setEditingInstituteId] = useState<string | null>(null);
   const [resetInstituteId, setResetInstituteId] = useState<string | null>(null);
+  const [deletingInstitute, setDeletingInstitute] = useState<Institute | null>(null);
   const [form, setForm] = useState({ name: '', email: '', phone: '', adminName: '', adminEmail: '', adminPassword: '' });
   const [editForm, setEditForm] = useState({ name: '', email: '', phone: '' });
   const [resetForm, setResetForm] = useState({ adminEmail: '', newPassword: '', confirmPassword: '' });
+  const [deleteConfirmed, setDeleteConfirmed] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -119,14 +126,42 @@ const InstitutesPage: React.FC = () => {
     }
   };
 
-  const handleDelete = async (instituteId: string, instituteName: string) => {
+  const openDeleteDialog = (item: Institute) => {
+    setDeletingInstitute(item);
+    setDeleteConfirmed(false);
+    setDeletePassword('');
+    setDeleteOpen(true);
+  };
+
+  const handleDelete = async () => {
+    if (!deletingInstitute) return;
+    if (!deleteConfirmed || !deletePassword.trim()) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please check the delete confirmation and enter your password.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setDeleteSubmitting(true);
     try {
-      await deleteInstitute(instituteId);
-      setInstitutes((prev) => prev.filter((item) => item.id !== instituteId));
-      queryClient.setQueryData<Institute[]>(['institutes'], (prev = []) => prev.filter((item) => item.id !== instituteId));
-      toast({ title: 'Institute Deleted', description: `${instituteName} has been removed.` });
+      await deleteInstitute({
+        instituteId: deletingInstitute.id,
+        confirmDelete: deleteConfirmed,
+        password: deletePassword,
+      });
+      setInstitutes((prev) => prev.filter((item) => item.id !== deletingInstitute.id));
+      queryClient.setQueryData<Institute[]>(['institutes'], (prev = []) => prev.filter((item) => item.id !== deletingInstitute.id));
+      toast({ title: 'Institute Deleted', description: `${deletingInstitute.name} has been removed.` });
+      setDeleteOpen(false);
+      setDeletingInstitute(null);
+      setDeleteConfirmed(false);
+      setDeletePassword('');
     } catch (error) {
       toast({ title: 'Failed to delete institute', description: (error as Error).message, variant: 'destructive' });
+    } finally {
+      setDeleteSubmitting(false);
     }
   };
 
@@ -260,35 +295,62 @@ const InstitutesPage: React.FC = () => {
               </AlertDialogContent>
             </AlertDialog>
 
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <span>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button variant="ghost" size="sm">
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Delete institute permanently</TooltipContent>
-                  </Tooltip>
-                </span>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Delete institute?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    This will permanently delete {item.name} and all linked records. This action cannot be undone.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction onClick={() => handleDelete(item.id, item.name)}>Delete</AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="sm" onClick={() => openDeleteDialog(item as Institute)}>
+                  <Trash2 className="h-4 w-4 text-destructive" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Delete institute permanently</TooltipContent>
+            </Tooltip>
           </div>
         )}
       />
+
+      <Dialog
+        open={deleteOpen}
+        onOpenChange={(open) => {
+          setDeleteOpen(open);
+          if (!open) {
+            setDeletingInstitute(null);
+            setDeleteConfirmed(false);
+            setDeletePassword('');
+          }
+        }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Delete institute?</DialogTitle></DialogHeader>
+          <div className="space-y-3 text-sm">
+            <div>
+              This will permanently delete <span className="font-medium">{deletingInstitute?.name || 'this institute'}</span> and all linked records. This action cannot be undone.
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox id="confirm-institute-delete" checked={deleteConfirmed} onCheckedChange={(checked) => setDeleteConfirmed(checked === true)} />
+              <Label htmlFor="confirm-institute-delete">Yes, I want to delete this institute.</Label>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="institute-delete-password">Enter your password</Label>
+              <Input
+                id="institute-delete-password"
+                type="password"
+                value={deletePassword}
+                onChange={(e) => setDeletePassword(e.target.value)}
+                placeholder="Your account password"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteOpen(false)} disabled={deleteSubmitting}>Cancel</Button>
+            <Button
+              variant="destructive"
+              disabled={!deleteConfirmed || !deletePassword.trim() || deleteSubmitting}
+              onClick={() => void handleDelete()}
+            >
+              {deleteSubmitting ? 'Deleting...' : 'Delete Permanently'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="max-w-lg">

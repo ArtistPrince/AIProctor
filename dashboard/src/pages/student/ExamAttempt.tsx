@@ -26,8 +26,40 @@ const ExamAttemptPage: React.FC = () => {
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [fullscreenActive, setFullscreenActive] = useState(false);
+  const [proctorWarning, setProctorWarning] = useState<string | null>(null);
+  const [twoWayMode, setTwoWayMode] = useState(false);
   const cameraVideoRef = React.useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = React.useRef<MediaStream | null>(null);
+  const proctorVideoRef = React.useRef<HTMLVideoElement | null>(null);
+  const proctorStreamRef = React.useRef<MediaStream | null>(null);
+  const rtcPeerRef = React.useRef<RTCPeerConnection | null>(null);
+  const signalSocketRef = React.useRef<WebSocket | null>(null);
+
+  const buildSignalUrl = (examId: string, studentId: string) => {
+    const apiBase = ((import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') || '/api');
+    if (apiBase.startsWith('http://') || apiBase.startsWith('https://')) {
+      const wsBase = apiBase.replace(/^http/, 'ws');
+      return `${wsBase}/proctoring/ws/${examId}/${studentId}?role=student`;
+    }
+
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const normalizedBase = apiBase.startsWith('/') ? apiBase : `/${apiBase}`;
+    return `${wsProtocol}://${window.location.host}${normalizedBase}/proctoring/ws/${examId}/${studentId}?role=student`;
+  };
+
+  const sendSignal = (payload: Record<string, unknown>) => {
+    const socket = signalSocketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    socket.send(JSON.stringify(payload));
+  };
+
+  const createAndSendOffer = async () => {
+    const peer = rtcPeerRef.current;
+    if (!peer || !signalSocketRef.current || signalSocketRef.current.readyState !== WebSocket.OPEN) return;
+    const offer = await peer.createOffer();
+    await peer.setLocalDescription(offer);
+    sendSignal({ type: 'signal-offer', sdp: offer });
+  };
 
   const attachStreamToPreview = async () => {
     const preview = cameraVideoRef.current;
@@ -63,6 +95,17 @@ const ExamAttemptPage: React.FC = () => {
         audio: false,
       });
       cameraStreamRef.current = stream;
+      const peer = rtcPeerRef.current;
+      if (peer) {
+        const senders = peer.getSenders();
+        stream.getTracks().forEach((track) => {
+          const exists = senders.some((sender) => sender.track?.id === track.id);
+          if (!exists) {
+            peer.addTrack(track, stream);
+          }
+        });
+        await createAndSendOffer();
+      }
       await attachStreamToPreview();
     } catch {
       setCameraReady(false);
@@ -155,6 +198,100 @@ const ExamAttemptPage: React.FC = () => {
     // If stream started before video mounted (loading state), attach once preview exists.
     void attachStreamToPreview();
   }, [questions.length, currentQ]);
+
+  useEffect(() => {
+    if (!selectedExam?.id || !user?.id) return;
+
+    const peer = new RTCPeerConnection({
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+    });
+    rtcPeerRef.current = peer;
+
+    const stream = cameraStreamRef.current;
+    if (stream) {
+      stream.getTracks().forEach((track) => {
+        peer.addTrack(track, stream);
+      });
+    }
+
+    peer.onicecandidate = (event) => {
+      if (event.candidate) {
+        sendSignal({ type: 'signal-candidate', candidate: event.candidate });
+      }
+    };
+
+    peer.ontrack = async (event) => {
+      const [remoteStream] = event.streams;
+      if (!remoteStream) return;
+      proctorStreamRef.current = remoteStream;
+      setTwoWayMode(true);
+      if (proctorVideoRef.current) {
+        proctorVideoRef.current.srcObject = remoteStream;
+        try {
+          await proctorVideoRef.current.play();
+        } catch {
+          // no-op
+        }
+      }
+    };
+
+    const signalSocket = new WebSocket(buildSignalUrl(selectedExam.id, user.id));
+    signalSocketRef.current = signalSocket;
+
+    signalSocket.onopen = () => {
+      sendSignal({ type: 'student-ready' });
+    };
+
+    signalSocket.onmessage = async (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        if (message.type === 'peer-joined' && message.role === 'proctor') {
+          await createAndSendOffer();
+          return;
+        }
+        if (message.type === 'proctor-ready' || message.type === 'request-offer') {
+          await createAndSendOffer();
+          return;
+        }
+        if (message.type === 'signal-answer' && message.sdp) {
+          await peer.setRemoteDescription(new RTCSessionDescription(message.sdp));
+          return;
+        }
+        if (message.type === 'signal-offer' && message.sdp) {
+          await peer.setRemoteDescription(new RTCSessionDescription(message.sdp));
+          const answer = await peer.createAnswer();
+          await peer.setLocalDescription(answer);
+          sendSignal({ type: 'signal-answer', sdp: answer });
+          return;
+        }
+        if (message.type === 'signal-candidate' && message.candidate) {
+          await peer.addIceCandidate(new RTCIceCandidate(message.candidate));
+          return;
+        }
+        if (message.type === 'warning' && typeof message.text === 'string' && message.text.trim()) {
+          setProctorWarning(message.text.trim());
+          return;
+        }
+        if (message.type === 'mode' && message.mode === 'one-way') {
+          setTwoWayMode(false);
+          return;
+        }
+        if (message.type === 'mode' && message.mode === 'two-way') {
+          setTwoWayMode(true);
+        }
+      } catch {
+        // no-op
+      }
+    };
+
+    return () => {
+      signalSocketRef.current?.close();
+      signalSocketRef.current = null;
+      rtcPeerRef.current?.close();
+      rtcPeerRef.current = null;
+      proctorStreamRef.current = null;
+    };
+  }, [selectedExam?.id, user?.id]);
 
   useEffect(() => {
     let reentryInterval: number | undefined;
@@ -301,6 +438,13 @@ const ExamAttemptPage: React.FC = () => {
         </div>
       </div>
 
+      {proctorWarning && (
+        <div className="bg-warning/15 border-y border-warning/30 px-6 py-2 text-sm text-warning-foreground flex items-center justify-between">
+          <span>Proctor Warning: {proctorWarning}</span>
+          <Button variant="outline" size="sm" onClick={() => setProctorWarning(null)}>Dismiss</Button>
+        </div>
+      )}
+
       <div className="flex flex-1">
         {/* Question nav */}
         <div className="w-20 bg-card border-r p-3 flex flex-col gap-2 overflow-y-auto">
@@ -397,6 +541,22 @@ const ExamAttemptPage: React.FC = () => {
         <Button variant="outline" size="sm" className="mt-3 w-full" onClick={() => void startCamera()}>
           Retry Camera Feed
         </Button>
+
+        <div className="mt-4">
+          <p className="text-sm font-semibold mb-2">Proctor Camera {twoWayMode ? '(Two-way)' : '(One-way)'}</p>
+          {twoWayMode ? (
+            <video
+              ref={proctorVideoRef}
+              autoPlay
+              playsInline
+              className="w-full h-36 rounded-md bg-muted object-cover border"
+            />
+          ) : (
+            <div className="w-full h-24 rounded-md border border-dashed bg-muted/40 text-xs text-muted-foreground flex items-center justify-center">
+              Two-way proctoring is not enabled.
+            </div>
+          )}
+        </div>
       </aside>
 
       <AlertDialog open={showTabWarning} onOpenChange={setShowTabWarning}>

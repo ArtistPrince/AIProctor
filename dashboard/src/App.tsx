@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 
 import LoginPage from "./pages/auth/LoginPage";
+import RegisterPage from "./pages/auth/RegisterPage";
 import SuperAdminDashboard from "./pages/super-admin/Dashboard";
 import InstitutesPage from "./pages/super-admin/Institutes";
 import InstituteDetailsPage from "@/pages/super-admin/InstituteDetails";
@@ -49,6 +50,7 @@ const AppRoutes = () => {
     return (
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
         <Route path="/institute-login" element={<Navigate to="/login" replace />} />
         <Route path="/dev-login" element={<Navigate to="/login" replace />} />
         <Route path="*" element={<Navigate to="/login" replace />} />
@@ -59,6 +61,7 @@ const AppRoutes = () => {
   return (
     <Routes>
       <Route path="/login" element={<Navigate to="/" replace />} />
+      <Route path="/register" element={<Navigate to="/" replace />} />
       <Route path="/institute-login" element={<Navigate to="/" replace />} />
       <Route path="/dev-login" element={<Navigate to="/" replace />} />
       {/* Super Admin */}

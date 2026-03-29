@@ -1,11 +1,11 @@
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from .. import database, models, schemas
-from ..security import get_password_hash, require_role
+from ..security import get_password_hash, require_role, verify_password
 from ..utils.partitions import ensure_tenant_partitions
 
 router = APIRouter()
@@ -154,6 +154,46 @@ def update_faculty(
         faculty_code=row.faculty_code,
         email=row.email,
     )
+
+
+@router.post("/faculties/{faculty_id}/hard-delete", status_code=204)
+def hard_delete_faculty(
+    faculty_id: str,
+    payload: schemas.PasswordConfirmedDeleteRequest,
+    db: Session = Depends(database.get_db),
+    current_user=Depends(require_admin),
+):
+    if not payload.confirm_delete:
+        raise HTTPException(status_code=400, detail="Please confirm deletion checkbox")
+    if not payload.password:
+        raise HTTPException(status_code=400, detail="Password is required")
+    if not current_user.password_hash or not verify_password(payload.password, current_user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid password")
+
+    faculty = db.query(models.Faculty).filter(models.Faculty.id == faculty_id).first()
+    if not faculty:
+        raise HTTPException(status_code=404, detail="Faculty not found")
+
+    if current_user.role != "super_admin" and str(faculty.institute_id) != str(current_user.institute_id):
+        raise HTTPException(status_code=403, detail="Cannot delete faculty outside your institute")
+
+    exams_count = (
+        db.query(models.Exam)
+        .filter(models.Exam.institute_id == faculty.institute_id)
+        .filter(models.Exam.faculty_id == faculty.id)
+        .count()
+    )
+    if exams_count > 0:
+        raise HTTPException(status_code=409, detail="Cannot delete faculty with linked exams")
+
+    try:
+        db.delete(faculty)
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to delete faculty: {exc}") from exc
+
+    return None
 
 
 @router.post("/faculties/import", response_model=schemas.FacultyImportResponse)

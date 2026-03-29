@@ -31,6 +31,11 @@ class InstituteAdminPasswordReset(BaseModel):
 	admin_email: Optional[str] = None
 
 
+class PasswordConfirmedDeleteRequest(BaseModel):
+	confirm_delete: bool
+	password: str
+
+
 class InstituteAdminImportRow(BaseModel):
 	name: str
 	email: str
@@ -280,6 +285,12 @@ class BatchCreate(BaseModel):
 	members: List[str] = []
 
 
+class BatchUpdate(BaseModel):
+	course_code: Optional[str] = None
+	batch_year: Optional[str] = None
+	course_name: Optional[str] = None
+
+
 class BatchOut(BaseModel):
 	id: str
 	institute_id: str
@@ -388,3 +399,23 @@ class ExamSessionWithDetails(BaseModel):
 
 	class Config:
 		from_attributes = True
+
+
+class ProctoringLogCreate(BaseModel):
+	exam_id: str
+	student_id: str
+	action: str
+	remark: Optional[str] = None
+	mode: Optional[str] = None
+
+
+class ProctoringLogOut(BaseModel):
+	id: str
+	exam_id: str
+	student_id: str
+	action: str
+	remark: Optional[str] = None
+	mode: Optional[str] = None
+	proctor_id: Optional[str] = None
+	proctor_email: Optional[str] = None
+	created_at: datetime

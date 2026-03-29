@@ -1,10 +1,11 @@
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from .. import database, models, schemas
-from ..security import get_password_hash, require_role
+from ..security import get_password_hash, require_role, verify_password
 
 router = APIRouter()
 require_admin = require_role(["super_admin", "institute_admin", "exam_admin"])
@@ -164,6 +165,41 @@ def update_student(
         roll_no=student.roll_no,
         section=student.section,
     )
+
+
+@router.post("/students/{student_id}/hard-delete", status_code=204)
+def hard_delete_student(
+    student_id: str,
+    payload: schemas.PasswordConfirmedDeleteRequest,
+    db: Session = Depends(database.get_db),
+    current_user=Depends(require_institute_admin),
+):
+    if not payload.confirm_delete:
+        raise HTTPException(status_code=400, detail="Please confirm deletion checkbox")
+    if not payload.password:
+        raise HTTPException(status_code=400, detail="Password is required")
+    if not current_user.password_hash or not verify_password(payload.password, current_user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid password")
+
+    student = db.query(models.Student).filter(models.Student.id == student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    if str(student.institute_id) != str(current_user.institute_id):
+        raise HTTPException(status_code=403, detail="Cannot delete student outside your institute")
+
+    try:
+        db.query(models.ExamSession).filter(
+            models.ExamSession.institute_id == student.institute_id,
+            models.ExamSession.student_id == student.id,
+        ).delete(synchronize_session=False)
+        db.delete(student)
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to delete student: {exc}") from exc
+
+    return None
 
 
 @router.post("/students/import", response_model=schemas.StudentImportResponse)

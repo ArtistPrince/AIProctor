@@ -143,6 +143,20 @@ const LoginPage: React.FC = () => {
             );
           })}
         </div>
+
+        <div className="mt-8 rounded-2xl border border-border bg-card p-5 md:p-6 shadow-card">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+              <h3 className="text-base font-semibold">Student Registration</h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                New here? Registration is only for students. Institute admins, faculty, and dev users should use login only.
+              </p>
+            </div>
+            <Button type="button" variant="outline" className="md:min-w-40" onClick={() => navigate('/register')}>
+              Register As Student
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
   );

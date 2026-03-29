@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
 from .. import database, models, schemas
-from ..security import require_role
+from ..security import require_role, verify_password
 from ..utils.partitions import ensure_tenant_partitions
 
 router = APIRouter()
@@ -107,6 +107,117 @@ def list_batches(
             )
         )
     return result
+
+
+@router.put("/batches/{batch_id}", response_model=schemas.BatchOut)
+def update_batch(
+    batch_id: str,
+    payload: schemas.BatchUpdate,
+    db: Session = Depends(database.get_db),
+    current_user=Depends(require_batch_manage),
+):
+    row = db.query(models.Batch).filter(models.Batch.id == batch_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    if current_user.role != "super_admin" and str(row.institute_id) != str(current_user.institute_id):
+        raise HTTPException(status_code=403, detail="Cannot update batch outside your institute")
+
+    data = payload.model_dump(exclude_unset=True)
+    next_course_code = row.course_code
+    next_batch_year = row.batch_year
+
+    if "course_name" in data and data["course_name"] is not None:
+        row.course_name = data["course_name"].strip()
+    if "course_code" in data and data["course_code"] is not None:
+        next_course_code = data["course_code"].strip().upper()
+    if "batch_year" in data and data["batch_year"] is not None:
+        next_batch_year = str(data["batch_year"]).strip()
+
+    if next_course_code != row.course_code or next_batch_year != row.batch_year:
+        existing = (
+            db.query(models.Batch)
+            .filter(models.Batch.institute_id == row.institute_id)
+            .filter(models.Batch.course_code == next_course_code)
+            .filter(models.Batch.batch_year == next_batch_year)
+            .filter(models.Batch.id != row.id)
+            .first()
+        )
+        if existing:
+            raise HTTPException(status_code=409, detail="Batch with this course and year already exists")
+
+    row.course_code = next_course_code
+    row.batch_year = next_batch_year
+
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        message = str(getattr(exc, "orig", exc)).lower()
+        if "batch_code" in message or "duplicate key" in message or "unique" in message:
+            raise HTTPException(status_code=409, detail="Batch already exists")
+        raise HTTPException(status_code=400, detail="Invalid batch update")
+
+    db.refresh(row)
+    members = [
+        student.student_code or str(student.id)
+        for student in db.query(models.Student).filter(models.Student.batch_id == row.id).all()
+    ]
+    return schemas.BatchOut(
+        id=str(row.id),
+        institute_id=str(row.institute_id),
+        course_code=row.course_code,
+        batch_year=row.batch_year,
+        batch_code=row.batch_code,
+        course_name=row.course_name,
+        name=row.course_name,
+        members=members,
+        created_at=row.created_at,
+    )
+
+
+@router.post("/batches/{batch_id}/hard-delete", status_code=204)
+def hard_delete_batch(
+    batch_id: str,
+    payload: schemas.PasswordConfirmedDeleteRequest,
+    db: Session = Depends(database.get_db),
+    current_user=Depends(require_batch_manage),
+):
+    if not payload.confirm_delete:
+        raise HTTPException(status_code=400, detail="Please confirm deletion checkbox")
+    if not payload.password:
+        raise HTTPException(status_code=400, detail="Password is required")
+    if not current_user.password_hash or not verify_password(payload.password, current_user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid password")
+
+    batch = db.query(models.Batch).filter(models.Batch.id == batch_id).first()
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    if current_user.role != "super_admin" and str(batch.institute_id) != str(current_user.institute_id):
+        raise HTTPException(status_code=403, detail="Cannot delete batch outside your institute")
+
+    students_count = (
+        db.query(models.Student)
+        .filter(models.Student.institute_id == batch.institute_id)
+        .filter(models.Student.batch_id == batch.id)
+        .count()
+    )
+    if students_count > 0:
+        raise HTTPException(status_code=409, detail="Cannot delete batch with assigned students")
+
+    try:
+        db.query(models.ExamAssignment).filter(
+            models.ExamAssignment.institute_id == batch.institute_id,
+            models.ExamAssignment.batch_id == batch.id,
+        ).delete(synchronize_session=False)
+        db.delete(batch)
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to delete batch: {exc}") from exc
+
+    return None
 
 
 @router.post("/batches/{batch_id}/members", response_model=schemas.BatchOut)

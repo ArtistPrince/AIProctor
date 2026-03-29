@@ -161,6 +161,7 @@ interface BackendSession {
   started_at?: string | null;
   completed_at?: string | null;
   violation_found?: boolean;
+  violation_count?: number | null;
   mongo_log_ref?: string | null;
   violation_logs_id?: string | null;
 }
@@ -182,6 +183,18 @@ interface BackendQuestion {
     options?: string[];
     correct_answer?: string;
   };
+}
+
+interface BackendProctoringLog {
+  id: string;
+  exam_id: string;
+  student_id: string;
+  action: string;
+  remark?: string | null;
+  mode?: string | null;
+  proctor_id?: string | null;
+  proctor_email?: string | null;
+  created_at: string;
 }
 
 function normalizeBackendRole(role: string): UserRole {
@@ -436,9 +449,14 @@ export async function updateInstitute(
   return mapInstitute(row);
 }
 
-export async function deleteInstitute(instituteId: string): Promise<void> {
-  await apiRequest<void>(`/institutes/${instituteId}`, {
+export async function deleteInstitute(payload: { instituteId: string; confirmDelete: boolean; password: string }): Promise<void> {
+  await apiRequest<void>(`/institutes/${payload.instituteId}`, {
     method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      confirm_delete: payload.confirmDelete,
+      password: payload.password,
+    }),
   });
 }
 
@@ -573,6 +591,17 @@ export async function updateFaculty(
   return mapFaculty(row);
 }
 
+export async function hardDeleteFaculty(payload: { facultyId: string; confirmDelete: boolean; password: string }): Promise<void> {
+  await apiRequest<void>(`/faculties/${payload.facultyId}/hard-delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      confirm_delete: payload.confirmDelete,
+      password: payload.password,
+    }),
+  });
+}
+
 export async function listBatches(): Promise<Batch[]> {
   const [rows, assignments, sessions, users] = await Promise.all([
     apiRequest<BackendBatch[]>('/batches/'),
@@ -630,6 +659,33 @@ export async function createBatch(payload: {
   return mapBatch(row);
 }
 
+export async function updateBatch(
+  batchId: string,
+  payload: { courseName?: string; courseCode?: string; batchYear?: string }
+): Promise<Batch> {
+  const row = await apiRequest<BackendBatch>(`/batches/${batchId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      course_name: payload.courseName,
+      course_code: payload.courseCode,
+      batch_year: payload.batchYear,
+    }),
+  });
+  return mapBatch(row);
+}
+
+export async function hardDeleteBatch(payload: { batchId: string; confirmDelete: boolean; password: string }): Promise<void> {
+  await apiRequest<void>(`/batches/${payload.batchId}/hard-delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      confirm_delete: payload.confirmDelete,
+      password: payload.password,
+    }),
+  });
+}
+
 export async function importBatches(
   rows: Array<{ courseName: string; courseCode: string; batchYear: string }>
 ): Promise<{ created: number }> {
@@ -659,6 +715,17 @@ export async function updateStudent(
       batch_id: payload.batchId,
       section: payload.section,
       roll_no: payload.rollNo,
+    }),
+  });
+}
+
+export async function hardDeleteStudent(payload: { studentId: string; confirmDelete: boolean; password: string }): Promise<void> {
+  await apiRequest<void>(`/students/${payload.studentId}/hard-delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      confirm_delete: payload.confirmDelete,
+      password: payload.password,
     }),
   });
 }
@@ -755,6 +822,17 @@ export async function updateExam(
     }),
   });
   return mapExam(row);
+}
+
+export async function hardDeleteExam(payload: { examId: string; confirmDelete: boolean; password: string }): Promise<void> {
+  await apiRequest<void>(`/exams/${payload.examId}/hard-delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      confirm_delete: payload.confirmDelete,
+      password: payload.password,
+    }),
+  });
 }
 
 export async function createQuestion(payload: {
@@ -854,7 +932,7 @@ export async function setResultRelease(sessionId: string, released: boolean): Pr
 }
 
 export async function listProctoringSessions(): Promise<ProctoringSession[]> {
-  const [sessions, users] = await Promise.all([listSessions(), listUsers()]);
+  const [sessions, users, exams] = await Promise.all([listSessions(), listUsers(), listExams()]);
   const userById = users.reduce<Record<string, string>>((acc, user) => {
     if (user.role === 'student') {
       acc[user.id] = user.name || user.email;
@@ -862,29 +940,87 @@ export async function listProctoringSessions(): Promise<ProctoringSession[]> {
     return acc;
   }, {});
 
-  return sessions.map((session) => {
-    const hasViolation = !!(session.violation_found || session.violation_logs_id || session.mongo_log_ref);
-    const status = session.status === 'terminated' ? 'warning' : 'connected';
-    const riskLevel = hasViolation ? 'high' : session.status === 'in_progress' ? 'medium' : 'low';
+  const liveExamIds = new Set(
+    exams
+      .filter((exam) => exam.status === 'live')
+      .map((exam) => exam.id)
+  );
+
+  const liveSessions = sessions.filter((session) => {
+    if (session.status !== 'in_progress') return false;
+    if (!liveExamIds.has(session.exam_id)) return false;
+    if (!session.started_at) return false;
+    if (session.completed_at) return false;
+    return true;
+  });
+
+  const resolveViolationCount = (session: BackendSession) => {
+    const explicit = Number(session.violation_count);
+    if (Number.isFinite(explicit) && explicit > 0) return Math.floor(explicit);
+
+    const candidates = [session.violation_logs_id, session.mongo_log_ref]
+      .map((value) => (value || '').toString())
+      .filter((value) => value.length > 0);
+
+    for (const value of candidates) {
+      const exactNumber = Number(value);
+      if (Number.isFinite(exactNumber) && exactNumber > 0) {
+        return Math.floor(exactNumber);
+      }
+
+      const match = value.match(/(\d{1,4})/);
+      if (match) {
+        const parsed = Number(match[1]);
+        if (Number.isFinite(parsed) && parsed > 0) {
+          return Math.floor(parsed);
+        }
+      }
+    }
+
+    return session.violation_found ? 1 : 0;
+  };
+
+  return liveSessions.map((session) => {
+    const violationCount = resolveViolationCount(session);
+    const hasViolation = violationCount > 0;
+    const status: ProctoringSession['status'] = hasViolation ? 'warning' : 'connected';
+    const riskLevel: ProctoringSession['riskLevel'] = hasViolation ? 'high' : 'medium';
     return {
       studentId: session.student_id,
+      examId: session.exam_id,
       studentName: userById[session.student_id] || session.student_code || 'Student',
       status,
       riskLevel,
       faceDetected: !hasViolation,
-      networkStrength: session.status === 'in_progress' ? 'strong' : 'moderate',
-      progress: session.status === 'completed' ? 100 : session.status === 'in_progress' ? 60 : 0,
-      violations: hasViolation
-        ? [
-            {
-              id: session.id,
-              type: 'Integrity Alert',
-              timestamp: new Date(session.completed_at || session.started_at || Date.now()).toLocaleTimeString(),
-              severity: 'high',
-              description: 'Potential exam integrity issue detected for this session.',
-            },
-          ]
-        : [],
+      networkStrength: hasViolation ? 'moderate' : 'strong',
+      progress: 60,
+      violations: Array.from({ length: violationCount }).map((_, index) => ({
+        id: `${session.id}-${index + 1}`,
+        type: `AI Integrity Alert ${index + 1}`,
+        timestamp: new Date(session.completed_at || session.started_at || Date.now()).toLocaleTimeString(),
+        severity: 'high' as const,
+        description: 'AI proctor detected a potential integrity issue.',
+      })),
     };
+  });
+}
+
+export async function createProctoringLog(payload: {
+  examId: string;
+  studentId: string;
+  action: 'warning' | 'remark' | 'mode_change';
+  remark?: string;
+  mode?: 'one-way' | 'two-way';
+}): Promise<BackendProctoringLog> {
+  return apiRequest<BackendProctoringLog>('/proctoring/logs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      exam_id: payload.examId,
+      student_id: payload.studentId,
+      action: payload.action,
+      remark: payload.remark,
+      mode: payload.mode,
+    }),
   });
 }
