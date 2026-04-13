@@ -1,18 +1,25 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware # <--- IMPORT THIS
+import os
 from .routers import exams, auth, questions, batches, assignments, institutes, users, sessions, departments, faculties, proctoring
 
 # Partitioned schema is provisioned through SQL migrations.
 
 app = FastAPI(title="AI Proctor Admin")
 
-# --- ADD THIS BLOCK TO FIX THE ERROR ---
-origins = [
-    "http://localhost:5173", # The address of your React Frontend
-    "http://127.0.0.1:5173",
-    "http://localhost:8080",
-    "http://127.0.0.1:8080",
-]
+# CORS origins can be provided as comma-separated values through CORS_ORIGINS.
+# Keeps localhost defaults and includes deployed frontend by default.
+_cors_origins_raw = os.getenv("CORS_ORIGINS", "")
+if _cors_origins_raw.strip():
+    origins = [origin.strip() for origin in _cors_origins_raw.split(",") if origin.strip()]
+else:
+    origins = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+        "https://ai-proctor-front.vercel.app",
+    ]
 
 app.add_middleware(
     CORSMiddleware,
@@ -21,7 +28,6 @@ app.add_middleware(
     allow_methods=["*"], # Allow all methods (POST, GET, etc.)
     allow_headers=["*"],
 )
-# ---------------------------------------
 
 # Include the Exam router
 app.include_router(exams.router, prefix="/api", tags=["Exams"])
